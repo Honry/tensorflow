@@ -191,7 +191,7 @@ TfLiteDelegatePtr CreateXNNPACKDelegate(int num_threads) {
 
 TfLiteDelegatePtr CreateWebNNDelegate(int device) {
 #if defined(TFLITE_WITHOUT_WEBNN)
-  return CreateNullDelegate();
+  return tools::CreateNullDelegate();
 #else
   TfLiteWebNNDelegateOptions options =
       TfLiteWebNNDelegateOptionsDefault();
