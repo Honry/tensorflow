@@ -2686,8 +2686,8 @@ class Subgraph {
       TF_LITE_ENSURE_STATUS(CheckTensorType(logging_context, shape_tensor,
                                             kTfLiteInt32, node->inputs->data[1],
                                             node_index));
-      TF_LITE_ENSURE_STATUS(CheckShapeTensorShape(
-          logging_context, shape_tensor, node->inputs->data[1], node_index));
+      // TF_LITE_ENSURE_STATUS(CheckShapeTensorShape(
+      //     logging_context, shape_tensor, node->inputs->data[1], node_index));
       TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
           logging_context, shape_tensor, node->inputs->data[1], node_index));
     }

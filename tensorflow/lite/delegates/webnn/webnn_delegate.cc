@@ -797,11 +797,11 @@ class Subgraph {
               builder, webnn_operands[input_tensor_id], 0.0f, 6.0f, constant_buffers);
         }
         return kTfLiteOk;
-      case kTfLiteActTanh:
-        if (builder) {
-          webnn_operands[output_tensor_id] = builder.Tanh(webnn_operands[input_tensor_id]);
-        }
-        return kTfLiteOk;
+      // case kTfLiteActTanh:
+      //   if (builder) {
+      //     webnn_operands[output_tensor_id] = builder.Tanh(webnn_operands[input_tensor_id]);
+      //   }
+      //   return kTfLiteOk;
       case kTfLiteActSignBit:
         TF_LITE_MAYBE_KERNEL_LOG(
             context, "unsupported fused activation (Sign) in node #%d",
@@ -874,14 +874,14 @@ class Subgraph {
                              node, context->tensors, reducer_params,
                              webnn_operands, constant_buffers);
       }
-      case kTfLiteBuiltinConcatenation: {
-        const TfLiteConcatenationParams* concat_params =
-            static_cast<const TfLiteConcatenationParams*>(node->builtin_data);
+      // case kTfLiteBuiltinConcatenation: {
+      //   const TfLiteConcatenationParams* concat_params =
+      //       static_cast<const TfLiteConcatenationParams*>(node->builtin_data);
 
-        return VisitConcatenationNode(builder, logging_context, node_index, node,
-                                      context->tensors, concat_params,
-                                      webnn_operands, constant_buffers);
-      }
+      //   return VisitConcatenationNode(builder, logging_context, node_index, node,
+      //                                 context->tensors, concat_params,
+      //                                 webnn_operands, constant_buffers);
+      // }
       case kTfLiteBuiltinConv2d: {
         const TfLiteConvParams* conv_params =
             static_cast<const TfLiteConvParams*>(node->builtin_data);
@@ -937,23 +937,23 @@ class Subgraph {
         return VisitSoftmaxNode(builder, logging_context, node_index, node,
                                 context->tensors, softmax_params, webnn_operands);
       }
-      case kTfLiteBuiltinSplit: {
-        const TfLiteSplitParams* split_params =
-            static_cast<const TfLiteSplitParams*>(node->builtin_data);
+      // case kTfLiteBuiltinSplit: {
+      //   const TfLiteSplitParams* split_params =
+      //       static_cast<const TfLiteSplitParams*>(node->builtin_data);
 
-        return VisitSplitNode(builder, logging_context, node_index, node,
-                                context->tensors, split_params, webnn_operands);
-      }
-      case kTfLiteBuiltinTanh:
-        return VisitTanhNode(builder, logging_context, node_index, node,
-                             context->tensors, webnn_operands);
-      case kTfLiteBuiltinUnpack: {
-        const TfLiteUnpackParams* unpack_params =
-            static_cast<const TfLiteUnpackParams*>(node->builtin_data);
+      //   return VisitSplitNode(builder, logging_context, node_index, node,
+      //                           context->tensors, split_params, webnn_operands);
+      // }
+      // case kTfLiteBuiltinTanh:
+      //   return VisitTanhNode(builder, logging_context, node_index, node,
+      //                        context->tensors, webnn_operands);
+      // case kTfLiteBuiltinUnpack: {
+      //   const TfLiteUnpackParams* unpack_params =
+      //       static_cast<const TfLiteUnpackParams*>(node->builtin_data);
 
-        return VisitUnpackNode(builder, logging_context, node_index, node,
-                               context->tensors, unpack_params, webnn_operands);
-      }
+      //   return VisitUnpackNode(builder, logging_context, node_index, node,
+      //                          context->tensors, unpack_params, webnn_operands);
+      // }
       case kTfLiteBuiltinCustom: {
         if (strcmp(registration->custom_name, "Convolution2DTransposeBias") ==
             0) {
@@ -1930,8 +1930,8 @@ class Subgraph {
       TF_LITE_ENSURE_STATUS(CheckTensorType(logging_context, shape_tensor,
                                             kTfLiteInt32, shape_tensor_id,
                                             node_index));
-      TF_LITE_ENSURE_STATUS(CheckShapeTensorShape(
-          logging_context, shape_tensor, shape_tensor_id, node_index));
+      // TF_LITE_ENSURE_STATUS(CheckShapeTensorShape(
+      //     logging_context, shape_tensor, shape_tensor_id, node_index));
       TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
           logging_context, shape_tensor,shape_tensor_id, node_index));
     }
