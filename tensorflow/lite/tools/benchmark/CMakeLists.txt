@@ -67,6 +67,7 @@ if(TFLITE_ENABLE_WEBNN)
     "$ENV{WEBNN_NATIVE_DIR}"
   )
 else()
+  set(TFLITE_BENCHMARK_CC_OPTIONS "-DTFLITE_WITHOUT_WEBNN")
   set(TFLITE_LABEL_IMAGE_CC_OPTIONS "-DTFLITE_WITHOUT_WEBNN")
 endif()  # TFLITE_ENABLE_WEBNN
 
@@ -108,8 +109,8 @@ if(TFLITE_ENABLE_WEBNN)
     )
   else()
     target_link_libraries(benchmark_model
-      webnn_native
-      webnn_proc
+      $ENV{WEBNN_NATIVE_DIR}/out/Release/libwebnn_native.so
+      $ENV{WEBNN_NATIVE_DIR}/out/Release/libwebnn_proc.so
     )
   endif()
 endif()

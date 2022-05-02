@@ -80,7 +80,7 @@ target_link_libraries(label_image
 
 if(TFLITE_ENABLE_WEBNN)
   target_link_libraries(label_image
-    webnn_native
-    webnn_proc
+    $ENV{WEBNN_NATIVE_DIR}/out/Release/libwebnn_native.so
+    $ENV{WEBNN_NATIVE_DIR}/out/Release/libwebnn_proc.so
   )
 endif()

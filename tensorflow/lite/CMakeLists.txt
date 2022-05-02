@@ -68,7 +68,7 @@ option(TFLITE_ENABLE_MMAP "Enable MMAP (unsupported on Windows)" ON)
 option(TFLITE_ENABLE_GPU "Enable GPU" OFF)
 option(TFLITE_ENABLE_XNNPACK "Enable XNNPACK backend" ON)
 option(TFLITE_ENABLE_EXTERNAL_DELEGATE "Enable External Delegate backend" ON)
-option(TFLITE_ENABLE_WEBNN "Enable WebNN backend" ON)
+option(TFLITE_ENABLE_WEBNN "Enable WebNN backend" OFF)
 
 option(TFLITE_KERNEL_TEST "Enable tflite kernel unit test" OFF)
 
