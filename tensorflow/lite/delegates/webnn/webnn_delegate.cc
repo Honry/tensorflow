@@ -773,6 +773,45 @@ class Subgraph {
     return builder.Clamp(input, &options);
   }
 
+  static wnn::FusionOperator GetClampOperator(
+      const wnn::GraphBuilder& builder, float min_value, float max_value) {
+    wnn::ClampOptions options;
+    options.minValue = min_value;
+    options.maxValue = max_value;
+    return builder.ClampOperator(&options);
+  }
+
+  static TfLiteStatus GetActivation(
+      const wnn::GraphBuilder& builder, TfLiteContext* context, int node_index,
+      TfLiteFusedActivation activation, wnn::FusionOperator& activation_operator) {
+    switch (activation) {
+      case kTfLiteActRelu:
+        activation_operator = builder.ReluOperator();
+        return kTfLiteOk;
+      case kTfLiteActReluN1To1:
+        activation_operator = GetClampOperator(builder, -1.0f, +1.0f);
+        return kTfLiteOk;
+      case kTfLiteActRelu6:
+        activation_operator = GetClampOperator(builder, 0.0f, 6.0f);
+        return kTfLiteOk;
+      // case kTfLiteActTanh:
+      //   activation_operator = builder.TanhOperator();
+      //   return kTfLiteOk;
+      case kTfLiteActSignBit:
+        TF_LITE_MAYBE_KERNEL_LOG(
+            context, "unsupported fused activation (Sign) in node #%d",
+            node_index);
+        return kTfLiteError;
+      case kTfLiteActSigmoid:
+          activation_operator = builder.SigmoidOperator();
+      default:
+        TF_LITE_MAYBE_KERNEL_LOG(context,
+                                 "invalid fused activation (%d) in node #%d",
+                                 static_cast<int>(activation), node_index);
+        return kTfLiteError;
+    }
+  }
+
   static TfLiteStatus VisitActivation(
       const wnn::GraphBuilder& builder, TfLiteContext* context, int node_index,
       int input_tensor_id, int output_tensor_id, TfLiteFusedActivation activation,
@@ -1440,21 +1479,23 @@ class Subgraph {
       options.filterLayout = wnn::Conv2dFilterOperandLayout::Ohwi;
       TF_LITE_ENSURE(logging_context, webnn_operands[input_tensor_id]);
       TF_LITE_ENSURE(logging_context, webnn_operands[filter_tensor_id]);
+      if (bias_tensor_id >= 0) {
+        TF_LITE_ENSURE(logging_context, webnn_operands[bias_tensor_id]);
+        options.bias = webnn_operands[bias_tensor_id];
+      }
+      wnn::FusionOperator activation_operator;
+      if (conv_params->activation != kTfLiteActNone) {
+        TF_LITE_ENSURE_STATUS(GetActivation(builder, logging_context, node_index,
+            conv_params->activation, activation_operator));
+        options.activation = activation_operator;
+      }
       wnn::Operand output =
           builder.Conv2d(webnn_operands[input_tensor_id],
                          webnn_operands[filter_tensor_id],
                          &options);
-      if (bias_tensor_id >= 0) {
-        TF_LITE_ENSURE(logging_context, webnn_operands[bias_tensor_id]);
-        output = builder.Add(output, webnn_operands[bias_tensor_id]);
-      }
       webnn_operands[output_tensor_id] = output;
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
     }
-
-    TF_LITE_ENSURE_STATUS(VisitActivation(
-          builder, logging_context, node_index, output_tensor_id, output_tensor_id,
-          conv_params->activation, webnn_operands, constant_buffers));
 
     return kTfLiteOk;
   }
@@ -1531,14 +1572,14 @@ class Subgraph {
       options.filterLayout = wnn::ConvTranspose2dFilterOperandLayout::Ohwi;
       TF_LITE_ENSURE(logging_context, webnn_operands[input_tensor_id]);
       TF_LITE_ENSURE(logging_context, webnn_operands[filter_tensor_id]);
+      if (bias_tensor_id >= 0) {
+        TF_LITE_ENSURE(logging_context, webnn_operands[bias_tensor_id]);
+        options.bias = webnn_operands[bias_tensor_id];
+      }
       wnn::Operand output =
           builder.ConvTranspose2d(webnn_operands[input_tensor_id],
                          webnn_operands[filter_tensor_id],
                          &options);
-      if (bias_tensor_id >= 0) {
-        TF_LITE_ENSURE(logging_context, webnn_operands[bias_tensor_id]);
-        output = builder.Add(output, webnn_operands[bias_tensor_id]);
-      }
       webnn_operands[output_tensor_id] = output;
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
     }
@@ -1623,21 +1664,24 @@ class Subgraph {
       options.groups = output_channels / dwconv_params->depth_multiplier;
       TF_LITE_ENSURE(logging_context, webnn_operands[input_tensor_id]);
       TF_LITE_ENSURE(logging_context, webnn_operands[filter_tensor_id]);
+
+      if (bias_tensor_id >= 0) {
+        TF_LITE_ENSURE(logging_context, webnn_operands[bias_tensor_id]);
+        options.bias = webnn_operands[bias_tensor_id];
+      }
+      wnn::FusionOperator activation_operator;
+      if (dwconv_params->activation != kTfLiteActNone) {
+        TF_LITE_ENSURE_STATUS(GetActivation(builder, logging_context, node_index,
+            dwconv_params->activation, activation_operator));
+        options.activation = activation_operator;
+      }
       wnn::Operand output =
           builder.Conv2d(webnn_operands[input_tensor_id],
                          webnn_operands[filter_tensor_id],
                          &options);
-      if (bias_tensor_id >= 0) {
-        TF_LITE_ENSURE(logging_context, webnn_operands[bias_tensor_id]);
-        output = builder.Add(output, webnn_operands[bias_tensor_id]);
-      }
       webnn_operands[output_tensor_id] = output;
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
     }
-
-    TF_LITE_ENSURE_STATUS(VisitActivation(
-        builder, logging_context, node_index, output_tensor_id, output_tensor_id,
-        dwconv_params->activation, webnn_operands, constant_buffers));
 
     return kTfLiteOk;
   }
