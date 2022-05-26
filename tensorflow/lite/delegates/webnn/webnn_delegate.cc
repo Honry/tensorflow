@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/lite/delegates/webnn/webnn_delegate.h"
 
+#include <iostream>
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -527,6 +528,26 @@ class Subgraph {
       return kTfLiteError;
     }
 
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus CheckResizeBilinearParams(
+      TfLiteContext* context, const TfLiteResizeBilinearParams* params,
+      int node_index) {
+        TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+          "==%d===================================%d", params->align_corners, params->half_pixel_centers);
+    if (params->align_corners) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context, "align_corners=true is not supported in node #%d",
+          node_index);
+      return kTfLiteError;
+    }
+    if (params->half_pixel_centers) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context, "half_pixel_centers=true is not supported in node #%d",
+          node_index);
+      return kTfLiteError;
+    }
     return kTfLiteOk;
   }
 
@@ -2000,6 +2021,8 @@ class Subgraph {
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteResizeBilinearParams* resize_params,
       std::vector<wnn::Operand>& webnn_operands) {
+    // TF_LITE_ENSURE_STATUS(
+        // CheckResizeBilinearParams(logging_context, resize_params, node_index));
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
 
@@ -2053,8 +2076,10 @@ class Subgraph {
       wnn::Operand input_operand = webnn_operands[input_tensor_id];
       TF_LITE_ENSURE(logging_context, input_operand);
       std::vector<int32_t> sizes = {shape_data[0], shape_data[1]};
+      std::cout << "----------webnn sizes: " << shape_data[0] << ", " << shape_data[1] << "\n";
       std::vector<int32_t> axes = {1, 2};
       wnn::Resample2dOptions options;
+      // half pixel = true align corner = false
       options.mode = wnn::InterpolationMode::Linear;
       options.sizes = sizes.data();
       options.sizesCount = sizes.size();
