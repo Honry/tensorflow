@@ -21,7 +21,3 @@ tf_workspace1()
 load("@//tensorflow:workspace0.bzl", "tf_workspace0")
 
 tf_workspace0()
-
-load("//third_party/webnn:webnn.bzl", "webnn_configure")
-
-webnn_configure(name = "webnn_native_project")

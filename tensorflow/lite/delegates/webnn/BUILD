@@ -32,7 +32,6 @@ cc_library(
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/schema:schema_fbs",
         "//tensorflow/lite/kernels/internal/utils:sparsity_format_converter",
-        "@webnn_native_project//:webnn-native",
         "@FP16",
     ],
 )
@@ -103,7 +102,6 @@ cc_library(
         "//tensorflow/lite/kernels/internal:compatibility",
         "//tensorflow/lite/kernels/internal:tensor",
         "//tensorflow/lite/tools/optimize:reduced_precision_support",
-        "@webnn_native_project//:webnn-native",
         "@FP16",
     ],
 )
