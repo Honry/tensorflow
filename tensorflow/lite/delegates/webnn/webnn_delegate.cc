@@ -374,7 +374,7 @@ class Subgraph {
       TF_LITE_KERNEL_LOG(context, "failed to build WebNN graph");
       return nullptr;
     }
-    return new Subgraph(wnn_graph, std::move(compute_inputs), std::move(outputs));
+    return new Subgraph(wnn_graph, wnn_graph1, std::move(compute_inputs), std::move(outputs));
   }
 
   TfLiteStatus Prepare(TfLiteContext* context) { return kTfLiteOk; }
@@ -407,6 +407,13 @@ class Subgraph {
         wnn_inputs_[t].resource.arrayBufferView.byteLength = context->tensors[t].bytes;
         std::string name = std::to_string(t);
         graph_inputs_.Set(name.c_str(), &wnn_inputs_[t]);
+
+        auto input_size = context->tensors[t].bytes / 4;
+        auto input_data = static_cast<void *>(context->tensors[t].data.raw);
+        emscripten::val view{ emscripten::typed_memory_view(input_size, static_cast<float*>(input_data)) };
+        auto result = emscripten::val::global("Float32Array").new_(input_size);
+        result.call<void>("set", view);
+        graph_inputs1_.set(name, result);
       }
 
       graph_outputs_ = wnn::CreateNamedOutputs();
@@ -415,10 +422,22 @@ class Subgraph {
         wnn_outputs_[t].arrayBufferView.byteLength = context->tensors[t].bytes;
         std::string name = std::to_string(t);
         graph_outputs_.Set(name.c_str(), &wnn_outputs_[t]);
+
+        auto output_size = context->tensors[t].bytes / 4;
+        auto output_data = static_cast<void *>(context->tensors[t].data.raw);
+        emscripten::val view{ emscripten::typed_memory_view(output_size, static_cast<float*>(output_data)) };
+        auto result = emscripten::val::global("Float32Array").new_(output_size);
+        result.call<void>("set", view);
+        graph_outputs1_.set(name, result);
       }
     }
 
     wnn_graph_.Compute(graph_inputs_, graph_outputs_);
+    wnn_graph1_.call<void>("compute", graph_inputs1_, graph_outputs1_);
+    emscripten::val::global("console").call<void>("log", emscripten::val("graph_inputs:::::"));
+    emscripten::val::global("console").call<void>("log", graph_inputs1_);
+    emscripten::val::global("console").call<void>("log", emscripten::val("graph_outputs1_:::::"));
+    emscripten::val::global("console").call<void>("log", graph_outputs1_);
     return kTfLiteOk;
   }
 
@@ -2363,8 +2382,8 @@ class Subgraph {
   }
 
  private:
-  Subgraph(wnn::Graph graph, std::unordered_set<int>&& inputs, std::unordered_set<int>&& outputs)
-      : wnn_graph_(graph), inputs_(inputs), outputs_(outputs) {
+  Subgraph(wnn::Graph graph, emscripten::val graph1, std::unordered_set<int>&& inputs, std::unordered_set<int>&& outputs)
+      : wnn_graph_(graph), wnn_graph1_(graph1), inputs_(inputs), outputs_(outputs) {
     for (auto& i : inputs_) {
       wnn_inputs_[i] = {};
       externals_[i] = nullptr;
@@ -2378,6 +2397,7 @@ class Subgraph {
   }
 
   wnn::Graph wnn_graph_;
+  emscripten::val wnn_graph1_ = emscripten::val::object();
   // TFLite Tensor IDs == name of input/output tensors for the
   // delegated subgraph.
   std::unordered_set<int> inputs_;
@@ -2386,6 +2406,8 @@ class Subgraph {
   std::unordered_map<int, wnn::Resource> wnn_outputs_;
   wnn::NamedInputs graph_inputs_;
   wnn::NamedOutputs graph_outputs_;
+  emscripten::val graph_inputs1_ = emscripten::val::object();
+  emscripten::val graph_outputs1_ = emscripten::val::object();
   std::unordered_map<int, void*> externals_;
   char dummy_data_{0};
 };
