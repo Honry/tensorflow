@@ -402,6 +402,7 @@ class Subgraph {
 
     if (any_pointers_changed) {
       graph_inputs_ = wnn::CreateNamedInputs();
+      graph_inputs1_ = emscripten::val::object();
       for (int t : inputs_) {
         wnn_inputs_[t].resource.arrayBufferView.buffer = context->tensors[t].data.raw;
         wnn_inputs_[t].resource.arrayBufferView.byteLength = context->tensors[t].bytes;
@@ -409,14 +410,16 @@ class Subgraph {
         graph_inputs_.Set(name.c_str(), &wnn_inputs_[t]);
 
         auto input_size = context->tensors[t].bytes / 4;
-        auto input_data = static_cast<void *>(context->tensors[t].data.raw);
-        emscripten::val view{ emscripten::typed_memory_view(input_size, static_cast<float*>(input_data)) };
+        auto input_data = context->tensors[t].data.f;
+        emscripten::val view{ emscripten::typed_memory_view(input_size, input_data) };
         auto result = emscripten::val::global("Float32Array").new_(input_size);
         result.call<void>("set", view);
+        wnn_inputs1_.at(t) = result;
         graph_inputs1_.set(name, result);
       }
 
       graph_outputs_ = wnn::CreateNamedOutputs();
+      graph_outputs1_ = emscripten::val::object();
       for (int t : outputs_) {
         wnn_outputs_[t].arrayBufferView.buffer = context->tensors[t].data.raw;
         wnn_outputs_[t].arrayBufferView.byteLength = context->tensors[t].bytes;
@@ -424,17 +427,22 @@ class Subgraph {
         graph_outputs_.Set(name.c_str(), &wnn_outputs_[t]);
 
         auto output_size = context->tensors[t].bytes / 4;
-        auto output_data = static_cast<void *>(context->tensors[t].data.raw);
-        emscripten::val view{ emscripten::typed_memory_view(output_size, static_cast<float*>(output_data)) };
+        auto output_data = context->tensors[t].data.f;
+        emscripten::val view{emscripten::typed_memory_view(output_size, output_data)};
         auto result = emscripten::val::global("Float32Array").new_(output_size);
         result.call<void>("set", view);
+        wnn_outputs1_.at(t) = result;
         graph_outputs1_.set(name, result);
       }
     }
 
-    wnn_graph_.Compute(graph_inputs_, graph_outputs_);
     wnn_graph1_.call<void>("compute", graph_inputs1_, graph_outputs1_);
-    emscripten::val::global("console").call<void>("log", emscripten::val("graph_inputs:::::"));
+    // Copy output data from JS to TFLite output tensors' buffer.
+    for (int t : outputs_) {
+      auto output_tmp = emscripten::convertJSArrayToNumberVector<float>(wnn_outputs1_.at(t));
+      std::memcpy(context->tensors[t].data.f, output_tmp.data(), output_tmp.size()*sizeof(float));
+    }
+    emscripten::val::global("console").call<void>("log", emscripten::val("graph_inputs1_:::::"));
     emscripten::val::global("console").call<void>("log", graph_inputs1_);
     emscripten::val::global("console").call<void>("log", emscripten::val("graph_outputs1_:::::"));
     emscripten::val::global("console").call<void>("log", graph_outputs1_);
@@ -960,14 +968,14 @@ class Subgraph {
       // case kTfLiteBuiltinPad:
       //   return VisitPadNode(builder, logging_context, node_index, node,
       //                       context->tensors, webnn_operands, constant_buffers);
-      // case kTfLiteBuiltinAveragePool2d: {
-      //   const TfLitePoolParams* pool_params =
-      //       static_cast<const TfLitePoolParams*>(node->builtin_data);
+      case kTfLiteBuiltinAveragePool2d: {
+        const TfLitePoolParams* pool_params =
+            static_cast<const TfLitePoolParams*>(node->builtin_data);
 
-      //   return VisitAveragePool2DNode(builder, logging_context, node_index,
-      //                                 node, context->tensors, pool_params,
-      //                                 webnn_operands, constant_buffers);
-      // }
+        return VisitAveragePool2DNode(builder, builder1, logging_context, node_index,
+                                      node, context->tensors, pool_params,
+                                      webnn_operands, webnn_operands1, constant_buffers);
+      }
       // case kTfLiteBuiltinMaxPool2d: {
       //   const TfLitePoolParams* pool_params =
       //       static_cast<const TfLitePoolParams*>(node->builtin_data);
@@ -1025,13 +1033,13 @@ class Subgraph {
       // case kTfLiteBuiltinRelu:
       //   return VisitReluNode(builder, logging_context, node_index, node,
       //                        context->tensors, webnn_operands);
-      // case kTfLiteBuiltinReshape: {
-      //   const TfLiteReshapeParams* reshape_params =
-      //       static_cast<const TfLiteReshapeParams*>(node->builtin_data);
+      case kTfLiteBuiltinReshape: {
+        const TfLiteReshapeParams* reshape_params =
+            static_cast<const TfLiteReshapeParams*>(node->builtin_data);
 
-      //   return VisitReshapeNode(builder, logging_context, node_index, node,
-      //                           context->tensors, reshape_params, webnn_operands);
-      // }
+        return VisitReshapeNode(builder, builder1, logging_context, node_index, node,
+                                context->tensors, reshape_params, webnn_operands, webnn_operands1);
+      }
       // case kTfLiteBuiltinResizeBilinear: {
       //   const TfLiteResizeBilinearParams* resize_params =
       //       static_cast<const TfLiteResizeBilinearParams*>(node->builtin_data);
@@ -1267,10 +1275,11 @@ class Subgraph {
   }
 
   static TfLiteStatus VisitAveragePool2DNode(
-      const wnn::GraphBuilder& builder, TfLiteContext* logging_context, int node_index,
+      const wnn::GraphBuilder& builder, const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLitePoolParams* pool_params,
       std::vector<wnn::Operand>& webnn_operands,
+      std::unordered_map<int, emscripten::val>& webnn_operands1,
       std::vector<std::unique_ptr<char>>& constant_buffers) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
@@ -1302,6 +1311,7 @@ class Subgraph {
       if (pool_params->filter_height == 1 && pool_params->filter_width == 1) {
         // Only do activation.
         output = webnn_operands[input_tensor_id];
+        webnn_operands1.insert(std::make_pair(output_tensor_id, webnn_operands1.at(input_tensor_id)));
       } else {
         wnn::Pool2dOptions options;
         options.autoPad = auto_pad;
@@ -1315,6 +1325,14 @@ class Subgraph {
         options.windowDimensionsCount = windowDimensions.size();
         options.layout = wnn::InputOperandLayout::Nhwc;
         output = builder.AveragePool2d(webnn_operands[input_tensor_id], &options);
+
+        // emscripten::val
+        emscripten::val options1 = emscripten::val::object();
+        options1.set("strides", emscripten::val::array(strides));
+        options1.set("windowDimensions", emscripten::val::array(windowDimensions));
+        options1.set("layout", emscripten::val("nhwc"));
+        webnn_operands1.insert(std::make_pair(output_tensor_id,
+            builder1.call<emscripten::val>("averagePool2d", webnn_operands1.at(input_tensor_id), options1)));
       }
       webnn_operands[output_tensor_id] = output;
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
@@ -2071,10 +2089,11 @@ class Subgraph {
   }
 
   static TfLiteStatus VisitReshapeNode(
-      const wnn::GraphBuilder& builder, TfLiteContext* logging_context, int node_index,
+      const wnn::GraphBuilder& builder, const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteReshapeParams* reshape_params,
-      std::vector<wnn::Operand>& webnn_operands) {
+      std::vector<wnn::Operand>& webnn_operands,
+      std::unordered_map<int, emscripten::val>& webnn_operands1) {
     switch (node->inputs->size) {
       case 1:
       case 2:
@@ -2123,6 +2142,10 @@ class Subgraph {
 
     if (builder) {
       TF_LITE_ENSURE(logging_context, webnn_operands[input_tensor_id]);
+      std::vector<int> newShape;
+      newShape.assign(&output_tensor.dims->data[0], &output_tensor.dims->data[0] + output_tensor.dims->size);
+      webnn_operands1.insert(std::make_pair(output_tensor_id,
+          builder1.call<emscripten::val>("reshape", webnn_operands1.at(input_tensor_id), emscripten::val::array(newShape))));
       webnn_operands[output_tensor_id] = builder.Reshape(
           webnn_operands[input_tensor_id], &output_tensor.dims->data[0], output_tensor.dims->size);
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
@@ -2444,15 +2467,19 @@ class Subgraph {
   Subgraph(wnn::Graph graph, emscripten::val graph1, std::unordered_set<int>&& inputs, std::unordered_set<int>&& outputs)
       : wnn_graph_(graph), wnn_graph1_(graph1), inputs_(inputs), outputs_(outputs) {
     for (auto& i : inputs_) {
-      wnn_inputs_[i] = {};
+      // wnn_inputs_[i] = {};
+      wnn_inputs1_.insert(std::make_pair(i, emscripten::val::object()));
       externals_[i] = nullptr;
     }
     for (auto& o : outputs_) {
-      wnn_outputs_[o] = {};
+      // wnn_outputs_[o] = {};
+      wnn_outputs1_.insert(std::make_pair(o, emscripten::val::object()));
       externals_[o] = nullptr;
     }
     graph_inputs_ = wnn::CreateNamedInputs();
     graph_outputs_ = wnn::CreateNamedOutputs();
+    graph_inputs1_ = emscripten::val::object();
+    graph_outputs1_ = emscripten::val::object();
   }
 
   wnn::Graph wnn_graph_;
@@ -2462,7 +2489,9 @@ class Subgraph {
   std::unordered_set<int> inputs_;
   std::unordered_set<int> outputs_;
   std::unordered_map<int, wnn::Input> wnn_inputs_;
+  std::unordered_map<int, emscripten::val> wnn_inputs1_;
   std::unordered_map<int, wnn::Resource> wnn_outputs_;
+  std::unordered_map<int, emscripten::val> wnn_outputs1_;
   wnn::NamedInputs graph_inputs_;
   wnn::NamedOutputs graph_outputs_;
   emscripten::val graph_inputs1_ = emscripten::val::object();
