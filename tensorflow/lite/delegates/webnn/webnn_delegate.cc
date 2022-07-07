@@ -992,22 +992,22 @@ class Subgraph {
       //                                 context->tensors, concat_params,
       //                                 webnn_operands, constant_buffers);
       // }
-      // case kTfLiteBuiltinConv2d: {
-      //   const TfLiteConvParams* conv_params =
-      //       static_cast<const TfLiteConvParams*>(node->builtin_data);
+      case kTfLiteBuiltinConv2d: {
+        const TfLiteConvParams* conv_params =
+            static_cast<const TfLiteConvParams*>(node->builtin_data);
 
-      //   return VisitConv2DNode(builder, logging_context, node_index, node,
-      //                          context->tensors, conv_params,
-      //                          quasi_static_tensors, webnn_operands, constant_buffers);
-      // }
-      // case kTfLiteBuiltinDepthwiseConv2d: {
-      //   const TfLiteDepthwiseConvParams* dwconv_params =
-      //       static_cast<const TfLiteDepthwiseConvParams*>(node->builtin_data);
+        return VisitConv2DNode(builder, builder1, logging_context, node_index, node,
+                               context->tensors, conv_params,
+                               quasi_static_tensors, webnn_operands, webnn_operands1, constant_buffers);
+      }
+      case kTfLiteBuiltinDepthwiseConv2d: {
+        const TfLiteDepthwiseConvParams* dwconv_params =
+            static_cast<const TfLiteDepthwiseConvParams*>(node->builtin_data);
 
-      //   return VisitDepthwiseConv2DNode(builder, logging_context, node_index,
-      //                                   node, context->tensors, dwconv_params,
-      //                                   quasi_static_tensors, webnn_operands, constant_buffers);
-      // }
+        return VisitDepthwiseConv2DNode(builder, builder1, logging_context, node_index,
+                                        node, context->tensors, dwconv_params,
+                                        quasi_static_tensors, webnn_operands, webnn_operands1, constant_buffers);
+      }
       // case kTfLiteBuiltinFullyConnected: {
       //   const TfLiteFullyConnectedParams* fc_params =
       //       static_cast<const TfLiteFullyConnectedParams*>(node->builtin_data);
@@ -1040,13 +1040,13 @@ class Subgraph {
       //                                  node, context->tensors, resize_params,
       //                                  webnn_operands);
       // }
-      // case kTfLiteBuiltinSoftmax: {
-      //   const TfLiteSoftmaxParams* softmax_params =
-      //       static_cast<const TfLiteSoftmaxParams*>(node->builtin_data);
+      case kTfLiteBuiltinSoftmax: {
+        const TfLiteSoftmaxParams* softmax_params =
+            static_cast<const TfLiteSoftmaxParams*>(node->builtin_data);
 
-      //   return VisitSoftmaxNode(builder, logging_context, node_index, node,
-      //                           context->tensors, softmax_params, webnn_operands);
-      // }
+        return VisitSoftmaxNode(builder, builder1, logging_context, node_index, node,
+                                context->tensors, softmax_params, webnn_operands, webnn_operands1);
+      }
       // case kTfLiteBuiltinSplit: {
       //   const TfLiteSplitParams* split_params =
       //       static_cast<const TfLiteSplitParams*>(node->builtin_data);
@@ -1483,11 +1483,12 @@ class Subgraph {
   }
 
   static TfLiteStatus VisitConv2DNode(
-      const wnn::GraphBuilder& builder, TfLiteContext* logging_context, int node_index,
+      const wnn::GraphBuilder& builder, const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteConvParams* conv_params,
       const std::unordered_set<int>& quasi_static_tensors,
       std::vector<wnn::Operand>& webnn_operands,
+      std::unordered_map<int, emscripten::val>& webnn_operands1,
       std::vector<std::unique_ptr<char>>& constant_buffers) {
     TF_LITE_ENSURE_STATUS(
         CheckConvolutionParams(logging_context, conv_params, node_index));
@@ -1573,6 +1574,33 @@ class Subgraph {
                          &options);
       webnn_operands[output_tensor_id] = output;
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
+
+      // *** emscripten val
+      emscripten::val options1 = emscripten::val::object();
+      if (auto_pad == wnn::AutoPad::SameUpper) {
+        options1.set("autoPad", emscripten::val("same-upper"));
+      } else if (auto_pad == wnn::AutoPad::SameLower) {
+        options1.set("autoPad", emscripten::val("same-lower"));
+      }
+      options1.set("strides", emscripten::val::array(strides));
+      options1.set("dilations", emscripten::val::array(dilations));
+      options1.set("inputLayout", emscripten::val("nhwc"));
+      options1.set("filterLayout", emscripten::val("ohwi"));
+      if (bias_tensor_id >= 0) {
+        TF_LITE_ENSURE(logging_context, webnn_operands1.at(bias_tensor_id));
+        options1.set("bias", webnn_operands1.at(bias_tensor_id));
+      }
+      if (conv_params->activation != kTfLiteActNone) {
+        emscripten::val clampOptions = emscripten::val::object();
+        clampOptions.set("minValue", emscripten::val(0));
+        clampOptions.set("maxValue", emscripten::val(6));
+        emscripten::val activation = builder1.call<emscripten::val>("clamp", clampOptions);
+        options1.set("activation", activation);
+      }
+      emscripten::val conv2d_output = builder1.call<emscripten::val>("conv2d",
+          webnn_operands1.at(input_tensor_id), webnn_operands1.at(filter_tensor_id), options1);
+      webnn_operands1.insert(std::make_pair(output_tensor_id, conv2d_output));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id));
     }
 
     return kTfLiteOk;
@@ -1666,11 +1694,12 @@ class Subgraph {
   }
 
   static TfLiteStatus VisitDepthwiseConv2DNode(
-      const wnn::GraphBuilder& builder, TfLiteContext* logging_context, int node_index,
+      const wnn::GraphBuilder& builder, const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteDepthwiseConvParams* dwconv_params,
       const std::unordered_set<int>& quasi_static_tensors,
       std::vector<wnn::Operand>& webnn_operands,
+      std::unordered_map<int, emscripten::val>& webnn_operands1,
       std::vector<std::unique_ptr<char>>& constant_buffers) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 3, 1, node_index));
@@ -1759,6 +1788,34 @@ class Subgraph {
                          &options);
       webnn_operands[output_tensor_id] = output;
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
+
+            // *** emscripten val
+      emscripten::val options1 = emscripten::val::object();
+      if (auto_pad == wnn::AutoPad::SameUpper) {
+        options1.set("autoPad", emscripten::val("same-upper"));
+      } else if (auto_pad == wnn::AutoPad::SameLower) {
+        options1.set("autoPad", emscripten::val("same-lower"));
+      }
+      options1.set("strides", emscripten::val::array(strides));
+      options1.set("dilations", emscripten::val::array(dilations));
+      options1.set("inputLayout", emscripten::val("nhwc"));
+      options1.set("filterLayout", emscripten::val("ihwo"));
+      options1.set("groups", emscripten::val(output_channels / dwconv_params->depth_multiplier));
+      if (bias_tensor_id >= 0) {
+        TF_LITE_ENSURE(logging_context, webnn_operands1.at(bias_tensor_id));
+        options1.set("bias", webnn_operands1.at(bias_tensor_id));
+      }
+      if (dwconv_params->activation != kTfLiteActNone) {
+        emscripten::val clampOptions = emscripten::val::object();
+        clampOptions.set("minValue", emscripten::val(0));
+        clampOptions.set("maxValue", emscripten::val(6));
+        emscripten::val activation = builder1.call<emscripten::val>("clamp", clampOptions);
+        options1.set("activation", activation);
+      }
+      emscripten::val dwise_output = builder1.call<emscripten::val>("conv2d",
+          webnn_operands1.at(input_tensor_id), webnn_operands1.at(filter_tensor_id), options1);
+      webnn_operands1.insert(std::make_pair(output_tensor_id, dwise_output));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id));
     }
 
     return kTfLiteOk;
@@ -2147,10 +2204,11 @@ class Subgraph {
   }
 
   static TfLiteStatus VisitSoftmaxNode(
-      const wnn::GraphBuilder& builder, TfLiteContext* logging_context, int node_index,
+      const wnn::GraphBuilder& builder, const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteSoftmaxParams* params,
-      std::vector<wnn::Operand>& webnn_operands) {
+      std::vector<wnn::Operand>& webnn_operands,
+      std::unordered_map<int, emscripten::val>& webnn_operands1) {
     if (params->beta != 1.0f) {
       if (logging_context != nullptr) {
         TF_LITE_KERNEL_LOG(logging_context,
@@ -2180,6 +2238,7 @@ class Subgraph {
     if (builder) {
       TF_LITE_ENSURE(logging_context, webnn_operands[input_tensor_id]);
       webnn_operands[output_tensor_id] = builder.Softmax(webnn_operands[input_tensor_id]);
+      webnn_operands1.insert(std::make_pair(output_tensor_id, builder1.call<emscripten::val>("softmax", webnn_operands1.at(input_tensor_id))));
       TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
     }
 
