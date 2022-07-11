@@ -305,8 +305,6 @@ class Subgraph {
           operand = wnn_builder.Input(name.c_str(), &desc);
         } else {
           wnn::ArrayBufferView buffer = {const_cast<void*>(data), context->tensors[t].bytes};
-          // buffer.buffer = data;
-          // buffer.byteLength = context->tensors[t].bytes;
           operand = wnn_builder.Constant(&desc, &buffer);
 
           auto data_size = context->tensors[t].bytes / 4;
@@ -401,47 +399,39 @@ class Subgraph {
     }
 
     if (any_pointers_changed) {
-      graph_inputs_ = wnn::CreateNamedInputs();
       graph_inputs1_ = emscripten::val::object();
       for (int t : inputs_) {
-        //wnn_inputs_[t].resource.arrayBufferView.buffer = context->tensors[t].data.raw;
-        //wnn_inputs_[t].resource.arrayBufferView.byteLength = context->tensors[t].bytes;
         std::string name = std::to_string(t);
-        //graph_inputs_.Set(name.c_str(), &wnn_inputs_[t]);
-
         auto input_size = context->tensors[t].bytes / 4;
         auto input_data = context->tensors[t].data.f;
         emscripten::val view{ emscripten::typed_memory_view(input_size, input_data) };
-        auto result = emscripten::val::global("Float32Array").new_(input_size);
-        result.call<void>("set", view);
-        wnn_inputs1_.at(t) = result;
-        graph_inputs1_.set(name, result);
+        auto input = emscripten::val::global("Float32Array").new_(input_size);
+        input.call<void>("set", view);
+        graph_inputs1_.set(name, input);
       }
 
-      //graph_outputs_ = wnn::CreateNamedOutputs();
       graph_outputs1_ = emscripten::val::object();
       for (int t : outputs_) {
-        //wnn_outputs_[t].arrayBufferView.buffer = context->tensors[t].data.raw;
-        //wnn_outputs_[t].arrayBufferView.byteLength = context->tensors[t].bytes;
         std::string name = std::to_string(t);
-        //graph_outputs_.Set(name.c_str(), &wnn_outputs_[t]);
-
         auto output_size = context->tensors[t].bytes / 4;
         auto output_data = context->tensors[t].data.f;
-        emscripten::val view{ emscripten::typed_memory_view(output_size, output_data) };
-        auto result = emscripten::val::global("Float32Array").new_(output_size);
-        result.call<void>("set", view);
-        wnn_outputs1_.at(t) = result;
-        graph_outputs1_.set(name, result);
+        emscripten::val view{emscripten::typed_memory_view(output_size, output_data)};
+        auto output = emscripten::val::global("Float32Array").new_(output_size);
+        output.call<void>("set", view);
+        graph_outputs1_.set(name, output);
       }
     }
 
-    //wnn_graph_.Compute(graph_inputs_, graph_outputs_);
-    wnn_graph1_.call<void>("compute", graph_inputs1_, graph_outputs1_);auto output_tmp = emscripten::convertJSArrayToNumberVector<float>(wnn_outputs1_.at(62)); //context->tensors[62].data.f = &output_tmp.data()[0];
-    emscripten::val::global("console").call<void>("log", emscripten::val("graph_inputs1_:::::"));std::memcpy(context->tensors[62].data.f, output_tmp.data(), output_tmp.size()*sizeof(float));//for (int i = 0; i < 1001; ++i) {context->tensors[62].data.f[i] =output_tmp.data()[i];}
+    wnn_graph1_.call<void>("compute", graph_inputs1_, graph_outputs1_);
+    // Copy output data from JS to TFLite output tensors' buffer.
+    for (int t : outputs_) {
+      auto output_tmp = emscripten::convertJSArrayToNumberVector<float>(graph_outputs1_[std::to_string(t)]);
+      std::memcpy(context->tensors[t].data.f, output_tmp.data(), output_tmp.size()*sizeof(float));
+    }
+    emscripten::val::global("console").call<void>("log", emscripten::val("graph_inputs1_:::::"));
     emscripten::val::global("console").call<void>("log", graph_inputs1_);
     emscripten::val::global("console").call<void>("log", emscripten::val("graph_outputs1_:::::"));
-    emscripten::val::global("console").call<void>("log", graph_outputs1_);emscripten::val::global("console").call<void>("log", wnn_outputs1_.at(62));
+    emscripten::val::global("console").call<void>("log", graph_outputs1_);
     return kTfLiteOk;
   }
 
@@ -2463,17 +2453,11 @@ class Subgraph {
   Subgraph(emscripten::val graph1, std::unordered_set<int>&& inputs, std::unordered_set<int>&& outputs)
       : wnn_graph1_(graph1), inputs_(inputs), outputs_(outputs) {
     for (auto& i : inputs_) {
-      //wnn_inputs_[i] = {};
-      wnn_inputs1_.insert(std::make_pair(i, emscripten::val::object()));
       externals_[i] = nullptr;
     }
     for (auto& o : outputs_) {
-      //wnn_outputs_[o] = {};
-      wnn_outputs1_.insert(std::make_pair(o, emscripten::val::object()));
       externals_[o] = nullptr;
     }
-    graph_inputs_ = wnn::CreateNamedInputs();
-    graph_outputs_ = wnn::CreateNamedOutputs();
     graph_inputs1_ = emscripten::val::object();
     graph_outputs1_ = emscripten::val::object();
   }
@@ -2484,12 +2468,6 @@ class Subgraph {
   // delegated subgraph.
   std::unordered_set<int> inputs_;
   std::unordered_set<int> outputs_;
-  std::unordered_map<int, wnn::Input> wnn_inputs_;
-  std::unordered_map<int, emscripten::val> wnn_inputs1_;
-  std::unordered_map<int, wnn::Resource> wnn_outputs_;
-  std::unordered_map<int, emscripten::val> wnn_outputs1_;
-  wnn::NamedInputs graph_inputs_;
-  wnn::NamedOutputs graph_outputs_;
   emscripten::val graph_inputs1_ = emscripten::val::object();
   emscripten::val graph_outputs1_ = emscripten::val::object();
   std::unordered_map<int, void*> externals_;
