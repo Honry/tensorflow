@@ -763,100 +763,100 @@ class Subgraph {
     return kTfLiteOk;
   }
 
-  // static wnn::Operand BuildClamp(
-  //     const wnn::GraphBuilder& builder, const wnn::Operand& input,
-  //     float min_value, float max_value, std::vector<std::unique_ptr<char>>& constant_buffers) {
-  //   wnn::ClampOptions options;
-  //   options.minValue = min_value;
-  //   options.maxValue = max_value;
-  //   return builder.Clamp(input, &options);
-  // }
+  static emscripten::val BuildClamp(
+      const emscripten::val& builder, const emscripten::val& input,
+      float min_value, float max_value, std::vector<std::unique_ptr<char>>& constant_buffers) {
+    emscripten::val options = emscripten::val::object();
+    options.set("minValue", emscripten::val(min_value));
+    options.set("maxValue", emscripten::val(max_value));
+    return builder.call<emscripten::val>("clamp", input, options);
+  }
 
-  // static wnn::FusionOperator GetClampOperator(
-  //     const wnn::GraphBuilder& builder, float min_value, float max_value) {
-  //   wnn::ClampOptions options;
-  //   options.minValue = min_value;
-  //   options.maxValue = max_value;
-  //   return builder.ClampOperator(&options);
-  // }
+  static emscripten::val GetClampOperator(
+      const emscripten::val& builder, float min_value, float max_value) {
+    emscripten::val options = emscripten::val::object();
+    options.set("minValue", emscripten::val(min_value));
+    options.set("maxValue", emscripten::val(max_value));
+    return builder.call<emscripten::val>("clamp", options);
+  }
 
-  // static TfLiteStatus GetActivation(
-  //     const wnn::GraphBuilder& builder, TfLiteContext* context, int node_index,
-  //     TfLiteFusedActivation activation, wnn::FusionOperator& activation_operator) {
-  //   switch (activation) {
-  //     case kTfLiteActRelu:
-  //       activation_operator = builder.ReluOperator();
-  //       return kTfLiteOk;
-  //     case kTfLiteActReluN1To1:
-  //       activation_operator = GetClampOperator(builder, -1.0f, +1.0f);
-  //       return kTfLiteOk;
-  //     case kTfLiteActRelu6:
-  //       activation_operator = GetClampOperator(builder, 0.0f, 6.0f);
-  //       return kTfLiteOk;
-  //     case kTfLiteActTanh:
-  //       activation_operator = builder.TanhOperator();
-  //       return kTfLiteOk;
-  //     case kTfLiteActSignBit:
-  //       TF_LITE_MAYBE_KERNEL_LOG(
-  //           context, "unsupported fused activation (Sign) in node #%d",
-  //           node_index);
-  //       return kTfLiteError;
-  //     case kTfLiteActSigmoid:
-  //         activation_operator = builder.SigmoidOperator();
-  //     default:
-  //       TF_LITE_MAYBE_KERNEL_LOG(context,
-  //                                "invalid fused activation (%d) in node #%d",
-  //                                static_cast<int>(activation), node_index);
-  //       return kTfLiteError;
-  //   }
-  // }
+  static TfLiteStatus GetActivation(
+      const emscripten::val& builder1, TfLiteContext* context, int node_index,
+      TfLiteFusedActivation activation, emscripten::val& activation_operator) {
+    switch (activation) {
+      case kTfLiteActRelu:
+        activation_operator = builder1.call<emscripten::val>("relu");
+        return kTfLiteOk;
+      case kTfLiteActReluN1To1:
+        activation_operator = GetClampOperator(builder1, -1.0f, +1.0f);
+        return kTfLiteOk;
+      case kTfLiteActRelu6:
+        activation_operator = GetClampOperator(builder1, 0.0f, 6.0f);
+        return kTfLiteOk;
+      case kTfLiteActTanh:
+        activation_operator = builder1.call<emscripten::val>("tanh");
+        return kTfLiteOk;
+      case kTfLiteActSignBit:
+        TF_LITE_MAYBE_KERNEL_LOG(
+            context, "unsupported fused activation (Sign) in node #%d",
+            node_index);
+        return kTfLiteError;
+      case kTfLiteActSigmoid:
+          activation_operator = builder1.call<emscripten::val>("sigmoid");
+      default:
+        TF_LITE_MAYBE_KERNEL_LOG(context,
+                                 "invalid fused activation (%d) in node #%d",
+                                 static_cast<int>(activation), node_index);
+        return kTfLiteError;
+    }
+  }
 
-  // static TfLiteStatus VisitActivation(
-  //     const wnn::GraphBuilder& builder, TfLiteContext* context, int node_index,
-  //     int input_tensor_id, int output_tensor_id, TfLiteFusedActivation activation,
-  //     std::vector<wnn::Operand>& webnn_operands, std::vector<std::unique_ptr<char>>& constant_buffers) {
-  //   switch (activation) {
-  //     case kTfLiteActNone:
-  //       return kTfLiteOk;
-  //     case kTfLiteActRelu:
-  //       if (builder) {
-  //         webnn_operands[output_tensor_id] = builder.Relu(webnn_operands[input_tensor_id]);
-  //       }
-  //       return kTfLiteOk;
-  //     case kTfLiteActReluN1To1:
-  //       if (builder) {
-  //         webnn_operands[output_tensor_id] = BuildClamp(
-  //             builder, webnn_operands[input_tensor_id], -1.0f, +1.0f, constant_buffers);
-  //       }
-  //       return kTfLiteOk;
-  //     case kTfLiteActRelu6:
-  //       if (builder) {
-  //         webnn_operands[output_tensor_id] = BuildClamp(
-  //             builder, webnn_operands[input_tensor_id], 0.0f, 6.0f, constant_buffers);
-  //       }
-  //       return kTfLiteOk;
-  //     case kTfLiteActTanh:
-  //       if (builder) {
-  //         webnn_operands[output_tensor_id] = builder.Tanh(webnn_operands[input_tensor_id]);
-  //       }
-  //       return kTfLiteOk;
-  //     case kTfLiteActSignBit:
-  //       TF_LITE_MAYBE_KERNEL_LOG(
-  //           context, "unsupported fused activation (Sign) in node #%d",
-  //           node_index);
-  //       return kTfLiteError;
-  //     case kTfLiteActSigmoid:
-  //       if (builder) {
-  //         webnn_operands[output_tensor_id] = builder.Sigmoid(webnn_operands[input_tensor_id]);
-  //       }
-  //       return kTfLiteOk;
-  //     default:
-  //       TF_LITE_MAYBE_KERNEL_LOG(context,
-  //                                "invalid fused activation (%d) in node #%d",
-  //                                static_cast<int>(activation), node_index);
-  //       return kTfLiteError;
-  //   }
-  // }
+  static TfLiteStatus VisitActivation(
+      const emscripten::val& builder1, TfLiteContext* context, int node_index,
+      int input_tensor_id, int output_tensor_id, TfLiteFusedActivation activation,
+      std::unordered_map<int, emscripten::val>& webnn_operands1, std::vector<std::unique_ptr<char>>& constant_buffers) {
+    switch (activation) {
+      case kTfLiteActNone:
+        return kTfLiteOk;
+      case kTfLiteActRelu:
+        if (!builder1.isNull()) {
+          webnn_operands1.at(output_tensor_id) = builder1.call<emscripten::val>("relu", webnn_operands1.at(input_tensor_id));
+        }
+        return kTfLiteOk;
+      case kTfLiteActReluN1To1:
+        if (!builder1.isNull()) {
+          webnn_operands1.at(output_tensor_id) = BuildClamp(
+              builder1, webnn_operands1.at(input_tensor_id), -1.0f, +1.0f, constant_buffers);
+        }
+        return kTfLiteOk;
+      case kTfLiteActRelu6:
+        if (!builder1.isNull()) {
+          webnn_operands1.at(output_tensor_id) = BuildClamp(
+              builder1, webnn_operands1.at(input_tensor_id), 0.0f, 6.0f, constant_buffers);
+        }
+        return kTfLiteOk;
+      case kTfLiteActTanh:
+        if (!builder1.isNull()) {
+          webnn_operands1.at(output_tensor_id) = builder1.call<emscripten::val>("tanh", webnn_operands1.at(input_tensor_id));
+        }
+        return kTfLiteOk;
+      case kTfLiteActSignBit:
+        TF_LITE_MAYBE_KERNEL_LOG(
+            context, "unsupported fused activation (Sign) in node #%d",
+            node_index);
+        return kTfLiteError;
+      case kTfLiteActSigmoid:
+        if (!builder1.isNull()) {
+          webnn_operands1.at(output_tensor_id) = builder1.call<emscripten::val>("sigmoid", webnn_operands1.at(input_tensor_id));
+        }
+        return kTfLiteOk;
+      default:
+        TF_LITE_MAYBE_KERNEL_LOG(context,
+                                 "invalid fused activation (%d) in node #%d",
+                                 static_cast<int>(activation), node_index);
+        return kTfLiteError;
+    }
+  }
 
   static TfLiteStatus VisitNode(
       const emscripten::val& builder1, TfLiteContext* context,
@@ -1047,11 +1047,11 @@ class Subgraph {
       TF_LITE_ENSURE(logging_context, webnn_operands1.at(output_tensor_id).as<bool>());
     }
 
-    // if (add_params != nullptr) {
-    //   TF_LITE_ENSURE_STATUS(VisitActivation(
-    //       builder, logging_context, node_index, output_tensor_id, output_tensor_id,
-    //       add_params->activation, webnn_operands, constant_buffers));
-    // }
+    if (add_params != nullptr) {
+      TF_LITE_ENSURE_STATUS(VisitActivation(
+          builder1, logging_context, node_index, output_tensor_id, output_tensor_id,
+          add_params->activation, webnn_operands1, constant_buffers));
+    }
 
     return kTfLiteOk;
   }
@@ -1239,9 +1239,9 @@ class Subgraph {
       TF_LITE_ENSURE(logging_context, webnn_operands1.at(output_tensor_id).as<bool>());
     }
 
-    // TF_LITE_ENSURE_STATUS(VisitActivation(
-    //       builder, logging_context, node_index, output_tensor_id, output_tensor_id,
-    //       pool_params->activation, webnn_operands, constant_buffers));
+    TF_LITE_ENSURE_STATUS(VisitActivation(
+          builder1, logging_context, node_index, output_tensor_id, output_tensor_id,
+          pool_params->activation, webnn_operands1, constant_buffers));
 
     return kTfLiteOk;
   }
@@ -1467,13 +1467,6 @@ class Subgraph {
       std::vector<int32_t> dilations = {
           conv_params->dilation_height_factor, conv_params->dilation_width_factor};
 
-      // wnn::FusionOperator activation_operator;
-      // if (conv_params->activation != kTfLiteActNone) {
-      //   TF_LITE_ENSURE_STATUS(GetActivation(builder, logging_context, node_index,
-      //       conv_params->activation, activation_operator));
-      //   options.activation = activation_operator;
-      // }
-
       emscripten::val options1 = emscripten::val::object();
       options1.set("autoPad", emscripten::val(auto_pad));
       options1.set("strides", emscripten::val::array(strides));
@@ -1486,12 +1479,12 @@ class Subgraph {
         TF_LITE_ENSURE(logging_context, webnn_operands1.at(bias_tensor_id).as<bool>());
         options1.set("bias", webnn_operands1.at(bias_tensor_id));
       }
+
+      emscripten::val activation_operator = emscripten::val::object();
       if (conv_params->activation != kTfLiteActNone) {
-        emscripten::val clampOptions = emscripten::val::object();
-        clampOptions.set("minValue", emscripten::val(0));
-        clampOptions.set("maxValue", emscripten::val(6));
-        emscripten::val activation = builder1.call<emscripten::val>("clamp", clampOptions);
-        options1.set("activation", activation);
+        TF_LITE_ENSURE_STATUS(GetActivation(builder1, logging_context, node_index,
+            conv_params->activation, activation_operator));
+        options1.set("activation", activation_operator);
       }
       emscripten::val output = builder1.call<emscripten::val>("conv2d",
           webnn_operands1.at(input_tensor_id), webnn_operands1.at(filter_tensor_id), options1);
@@ -1656,14 +1649,6 @@ class Subgraph {
       std::vector<int32_t> dilations = {
           dwconv_params->dilation_height_factor, dwconv_params->dilation_width_factor};
 
-      // wnn::FusionOperator activation_operator;
-      // if (dwconv_params->activation != kTfLiteActNone) {
-      //   TF_LITE_ENSURE_STATUS(GetActivation(builder, logging_context, node_index,
-      //       dwconv_params->activation, activation_operator));
-      //   options.activation = activation_operator;
-      // }
-
-      // *** emscripten val
       emscripten::val options1 = emscripten::val::object();
       options1.set("autoPad", emscripten::val(auto_pad));
       options1.set("strides", emscripten::val::array(strides));
@@ -1677,12 +1662,12 @@ class Subgraph {
         TF_LITE_ENSURE(logging_context, webnn_operands1.at(bias_tensor_id).as<bool>());
         options1.set("bias", webnn_operands1.at(bias_tensor_id));
       }
+
+      emscripten::val activation_operator = emscripten::val::object();
       if (dwconv_params->activation != kTfLiteActNone) {
-        emscripten::val clampOptions = emscripten::val::object();
-        clampOptions.set("minValue", emscripten::val(0));
-        clampOptions.set("maxValue", emscripten::val(6));
-        emscripten::val activation = builder1.call<emscripten::val>("clamp", clampOptions);
-        options1.set("activation", activation);
+        TF_LITE_ENSURE_STATUS(GetActivation(builder1, logging_context, node_index,
+            dwconv_params->activation, activation_operator));
+        options1.set("activation", activation_operator);
       }
       emscripten::val output = builder1.call<emscripten::val>("conv2d",
           webnn_operands1.at(input_tensor_id), webnn_operands1.at(filter_tensor_id), options1);
