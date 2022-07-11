@@ -941,8 +941,8 @@ class Subgraph {
         const TfLiteAddParams* add_params =
             static_cast<const TfLiteAddParams*>(node->builtin_data);
 
-        return VisitAddNode(builder, builder1, logging_context, node_index, node,
-                            context->tensors, add_params, webnn_operands, webnn_operands1, constant_buffers);
+        return VisitAddNode(builder1, logging_context, node_index, node,
+                            context->tensors, add_params, webnn_operands1, constant_buffers);
       }
       // case kTfLiteBuiltinMul: {
       //   const TfLiteMulParams* mul_params =
@@ -1077,10 +1077,9 @@ class Subgraph {
   }
 
   static TfLiteStatus VisitAddNode(
-      const wnn::GraphBuilder& builder, const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
+      const emscripten::val& builder1, TfLiteContext* logging_context, int node_index,
       TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteAddParams* add_params,
-      std::vector<wnn::Operand>& webnn_operands,
       std::unordered_map<int, emscripten::val>& webnn_operands1,
       std::vector<std::unique_ptr<char>>& constant_buffers) {
     TF_LITE_ENSURE_STATUS(
@@ -1107,16 +1106,11 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, output_tensor_id, node_index));
 
-    if (builder) {
-      TF_LITE_ENSURE(logging_context, webnn_operands[input1_tensor_id]);
-      TF_LITE_ENSURE(logging_context, webnn_operands[input2_tensor_id]);
+    if (builder1.as<bool>()) {
       TF_LITE_ENSURE(logging_context, webnn_operands1.at(input1_tensor_id));
       TF_LITE_ENSURE(logging_context, webnn_operands1.at(input2_tensor_id));
-      webnn_operands[output_tensor_id] =
-          builder.Add(webnn_operands[input1_tensor_id], webnn_operands[input2_tensor_id]);
       webnn_operands1.insert(std::make_pair(output_tensor_id,
           builder1.call<emscripten::val>("add", webnn_operands1.at(input1_tensor_id), webnn_operands1.at(input2_tensor_id))));
-      TF_LITE_ENSURE(logging_context, webnn_operands[output_tensor_id]);
       TF_LITE_ENSURE(logging_context, webnn_operands1.at(output_tensor_id));
       emscripten::val::global("console").call<void>("log", emscripten::val("add op output:"));
       emscripten::val::global("console").call<void>("log", emscripten::val(output_tensor_id));
@@ -1604,7 +1598,7 @@ class Subgraph {
       emscripten::val conv2d_output = builder1.call<emscripten::val>("conv2d",
           webnn_operands1.at(input_tensor_id), webnn_operands1.at(filter_tensor_id), options1);
       webnn_operands1.insert(std::make_pair(output_tensor_id, conv2d_output));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id));
+      TF_LITE_ENSURE(logging_context, webnn_operands1.at(output_tensor_id));
     }
 
     return kTfLiteOk;
@@ -1819,7 +1813,7 @@ class Subgraph {
       emscripten::val dwise_output = builder1.call<emscripten::val>("conv2d",
           webnn_operands1.at(input_tensor_id), webnn_operands1.at(filter_tensor_id), options1);
       webnn_operands1.insert(std::make_pair(output_tensor_id, dwise_output));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id));
+      TF_LITE_ENSURE(logging_context, webnn_operands1.at(output_tensor_id));
     }
 
     return kTfLiteOk;
