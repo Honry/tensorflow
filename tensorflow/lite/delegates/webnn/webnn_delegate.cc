@@ -125,14 +125,12 @@ class Subgraph {
     context_options1.set("devicePreference", emscripten::val(delegate->device_preference_name_));
     context_options1.set("powerPreference", emscripten::val(delegate->power_preference_name_));
     emscripten::val wnn_context1 = ml.call<emscripten::val>("createContext", context_options1);
-    emscripten::val::global("console").call<void>("log", wnn_context1);
 
     if (!wnn_context1.as<bool>()) {
       TF_LITE_KERNEL_LOG(context, "Failed to create WebNN context.");
       return nullptr;
     }
     emscripten::val wnn_builder1 = emscripten::val::global("MLGraphBuilder").new_(wnn_context1);
-    emscripten::val::global("console").call<void>("log", wnn_builder1);
     if (!wnn_builder1.as<bool>()) {
       TF_LITE_KERNEL_LOG(context, "Failed to create WebNN graph builder.");
       return nullptr;
@@ -258,9 +256,6 @@ class Subgraph {
         desc1.set("dimensions", emscripten::val::array(dims));
 
         emscripten::val operand1 = emscripten::val::object();
-
-        emscripten::val::global("console").call<void>("log", emscripten::val(t));
-        emscripten::val::global("console").call<void>("log", desc1);
         if (data == nullptr) {
           compute_inputs.insert(t);
           std::string name = std::to_string(t);
@@ -273,7 +268,6 @@ class Subgraph {
           operand1 = wnn_builder1.call<emscripten::val>("constant", desc1, result);
         }
         webnn_operands1.insert(std::make_pair(t, operand1));
-        emscripten::val::global("console").call<void>("log", webnn_operands1.at(t));
       }
     }
 
@@ -308,13 +302,10 @@ class Subgraph {
         TF_LITE_KERNEL_LOG(context, "Invalid operand");
         return nullptr;
       }
-      emscripten::val::global("console").call<void>("log", emscripten::val(o));
       named_operands1.set(name, webnn_operands1.at(o));
     }
 
     emscripten::val wnn_graph1 = wnn_builder1.call<emscripten::val>("build", named_operands1);
-    emscripten::val::global("console").call<void>("log", emscripten::val("wnn_graph1: "));
-    emscripten::val::global("console").call<void>("log", wnn_graph1);
     if (!wnn_graph1.as<bool>()) {
       TF_LITE_KERNEL_LOG(context, "failed to build WebNN graph1");
       return nullptr;
@@ -375,10 +366,7 @@ class Subgraph {
       auto output_tmp = emscripten::convertJSArrayToNumberVector<float>(graph_outputs1_[std::to_string(t)]);
       std::memcpy(context->tensors[t].data.f, output_tmp.data(), output_tmp.size()*sizeof(float));
     }
-    emscripten::val::global("console").call<void>("log", emscripten::val("graph_inputs1_:::::"));
-    emscripten::val::global("console").call<void>("log", graph_inputs1_);
-    emscripten::val::global("console").call<void>("log", emscripten::val("graph_outputs1_:::::"));
-    emscripten::val::global("console").call<void>("log", graph_outputs1_);
+
     return kTfLiteOk;
   }
 
@@ -1057,9 +1045,6 @@ class Subgraph {
       webnn_operands1.insert(std::make_pair(output_tensor_id,
           builder1.call<emscripten::val>("add", webnn_operands1.at(input1_tensor_id), webnn_operands1.at(input2_tensor_id))));
       TF_LITE_ENSURE(logging_context, webnn_operands1.at(output_tensor_id).as<bool>());
-      emscripten::val::global("console").call<void>("log", emscripten::val("add op output:"));
-      emscripten::val::global("console").call<void>("log", emscripten::val(output_tensor_id));
-      emscripten::val::global("console").call<void>("log", webnn_operands1.at(output_tensor_id));
     }
 
     // if (add_params != nullptr) {
