@@ -52,16 +52,16 @@ class Delegate {
 
  public:
   explicit Delegate(const TfLiteWebNNDelegateOptions* options) {
-    std::unordered_map<uint32_t, std::string> device_preference_name_s = {
+    std::unordered_map<uint32_t, std::string> device_type_name_s = {
         {0, "auto"}, {1, "gpu"}, {2, "cpu"}};
     std::unordered_map<uint32_t, std::string> power_preference_name_s = {
         {0, "auto"}, {1, "high-performance"}, {2, "low-power"}};
-    device_preference_name_ = device_preference_name_s[options->devicePreference];
+    device_type_name_ = device_type_name_s[options->deviceType];
     power_preference_name_ = power_preference_name_s[options->powerPreference];
     TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                          "Created TensorFlow Lite WebNN delegate for device"
                          " %s and power %s.",
-                         device_preference_name_.c_str(),
+                         device_type_name_.c_str(),
                          power_preference_name_.c_str());
   }
 
@@ -91,7 +91,7 @@ class Delegate {
   std::unordered_set<int> static_unpack_nodes_;
   // Set of indices of tensors with unpacked static sparse weights.
   std::unordered_set<int> static_sparse_weights_;
-  std::string device_preference_name_;
+  std::string device_type_name_;
   std::string power_preference_name_;
 };
 
@@ -122,7 +122,7 @@ class Subgraph {
     // Create WebNN context and graph builder
     thread_local const emscripten::val ml = emscripten::val::global("navigator")["ml"];
     emscripten::val context_options = emscripten::val::object();
-    context_options.set("devicePreference", emscripten::val(delegate->device_preference_name_));
+    context_options.set("deviceType", emscripten::val(delegate->device_type_name_));
     context_options.set("powerPreference", emscripten::val(delegate->power_preference_name_));
     emscripten::val wnn_context = ml.call<emscripten::val>("createContextSync", context_options);
 
@@ -2740,7 +2740,7 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
 }  // namespace tflite
 
 TfLiteWebNNDelegateOptions TfLiteWebNNDelegateOptionsDefault() {
-  TfLiteWebNNDelegateOptions options = {0, 0};
+  TfLiteWebNNDelegateOptions options = {2, 0};
   return options;
 }
 

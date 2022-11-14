@@ -195,7 +195,7 @@ TfLiteDelegatePtr CreateWebNNDelegate(int device) {
 #else
   TfLiteWebNNDelegateOptions options =
       TfLiteWebNNDelegateOptionsDefault();
-  options.devicePreference = device;
+  options.deviceType = device;
   auto webnn_delegate = TfLiteWebNNDelegateCreate(&options);
   return TfLiteDelegatePtr(webnn_delegate, [](TfLiteDelegate* delegate) {
     TfLiteWebNNDelegateDelete(delegate);

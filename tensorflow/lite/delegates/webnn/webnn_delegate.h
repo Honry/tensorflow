@@ -23,14 +23,14 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct {
-  // enum class DevicePreference : uint32_t {
-  //     Default = 0x00000000,
+  // enum class DeviceType : uint32_t {
+  //     Auto = 0x00000000,
   //     Gpu = 0x00000001,
   //     Cpu = 0x00000002,
   // };
-  uint32_t devicePreference;
+  uint32_t deviceType;
   // enum class PowerPreference : uint32_t {
-  //     Default = 0x00000000,
+  //     Auto = 0x00000000,
   //     High_performance = 0x00000001,
   //     Low_power = 0x00000002,
   // };

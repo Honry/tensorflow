@@ -36,7 +36,7 @@ TEST(Delegate, CreateWithDefaultParams) {
 TEST(Delegate, CreateWithGpuPreferenceParam) {
   TfLiteWebNNDelegateOptions delegate_options =
       TfLiteWebNNDelegateOptionsDefault();
-  delegate_options.devicePreference = 1;
+  delegate_options.deviceType = 1;
   std::unique_ptr<TfLiteDelegate, decltype(&TfLiteWebNNDelegateDelete)>
       webnn_delegate(TfLiteWebNNDelegateCreate(&delegate_options),
                      TfLiteWebNNDelegateDelete);
@@ -45,7 +45,7 @@ TEST(Delegate, CreateWithGpuPreferenceParam) {
 TEST(Delegate, CreateWithCpuPreferenceParam) {
   TfLiteWebNNDelegateOptions delegate_options =
       TfLiteWebNNDelegateOptionsDefault();
-  delegate_options.devicePreference = 2;
+  delegate_options.deviceType = 2;
   std::unique_ptr<TfLiteDelegate, decltype(&TfLiteWebNNDelegateDelete)>
       webnn_delegate(TfLiteWebNNDelegateCreate(&delegate_options),
                      TfLiteWebNNDelegateDelete);
