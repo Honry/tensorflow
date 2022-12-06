@@ -756,16 +756,16 @@ class Subgraph {
       const emscripten::val& builder, const emscripten::val& input,
       float min_value, float max_value, std::vector<std::unique_ptr<char>>& constant_buffers) {
     emscripten::val options = emscripten::val::object();
-    options.set("minValue", emscripten::val(min_value));
-    options.set("maxValue", emscripten::val(max_value));
+    options.set("minValue", min_value);
+    options.set("maxValue", max_value);
     return builder.call<emscripten::val>("clamp", input, options);
   }
 
   static emscripten::val GetClampOperator(
       const emscripten::val& builder, float min_value, float max_value) {
     emscripten::val options = emscripten::val::object();
-    options.set("minValue", emscripten::val(min_value));
-    options.set("maxValue", emscripten::val(max_value));
+    options.set("minValue", min_value);
+    options.set("maxValue", max_value);
     return builder.call<emscripten::val>("clamp", options);
   }
 
@@ -866,6 +866,13 @@ class Subgraph {
 
         return VisitAddNode(builder, logging_context, node_index, node,
                             context->tensors, add_params, webnn_operands, constant_buffers);
+      }
+      case kTfLiteBuiltinSub: {
+        const TfLiteSubParams* sub_params =
+            static_cast<const TfLiteSubParams*>(node->builtin_data);
+
+        return VisitSubNode(builder, logging_context, node_index, node,
+                            context->tensors, sub_params, webnn_operands, constant_buffers);
       }
       case kTfLiteBuiltinMul: {
         const TfLiteMulParams* mul_params =
@@ -1040,6 +1047,52 @@ class Subgraph {
       TF_LITE_ENSURE_STATUS(VisitActivation(
           builder, logging_context, node_index, output_tensor_id, output_tensor_id,
           add_params->activation, webnn_operands, constant_buffers));
+    }
+
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus VisitSubNode(
+      const emscripten::val& builder, TfLiteContext* logging_context, int node_index,
+      TfLiteNode* node, const TfLiteTensor* tensors,
+      const TfLiteSubParams* sub_params,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      std::vector<std::unique_ptr<char>>& constant_buffers) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
+
+    const int input1_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input1_tensor = tensors[input1_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+
+    const int input2_tensor_id = node->inputs->data[1];
+    const TfLiteTensor& input2_tensor = tensors[input2_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    if (!builder.isNull()) {
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input1_tensor_id).as<bool>());
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input2_tensor_id).as<bool>());
+      webnn_operands.insert(std::make_pair(output_tensor_id,
+          builder.call<emscripten::val>("sub", webnn_operands.at(input1_tensor_id), webnn_operands.at(input2_tensor_id))));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
+    }
+
+    if (sub_params != nullptr) {
+      TF_LITE_ENSURE_STATUS(VisitActivation(
+          builder, logging_context, node_index, output_tensor_id, output_tensor_id,
+          sub_params->activation, webnn_operands, constant_buffers));
     }
 
     return kTfLiteOk;
@@ -2182,7 +2235,7 @@ class Subgraph {
     if (!builder.isNull()) {
       std::vector<uint32_t> splits = {static_cast<const uint32_t>(num_splits)};
       emscripten::val options = emscripten::val::object();
-      options.set("axis", emscripten::val(axis_value));
+      options.set("axis", axis_value);
       TF_LITE_ENSURE(logging_context, webnn_operands.at(input_tensor_id).as<bool>());
       emscripten::val split_operand_array = builder.call<emscripten::val>(
           "split", webnn_operands.at(input_tensor_id),
@@ -2301,7 +2354,7 @@ class Subgraph {
       } else {
         std::vector<uint32_t> splits = {static_cast<const uint32_t>(num)};
         emscripten::val options = emscripten::val::object();
-        options.set("axis", emscripten::val(axis));
+        options.set("axis", axis);
         emscripten::val split_operand_array = builder.call<emscripten::val>(
             "split", webnn_operands.at(input_tensor_id),
             emscripten::val::array(splits), options);
