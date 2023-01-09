@@ -39,7 +39,6 @@ cc_library(
 cc_library(
     name = "webnn_delegate_adaptor",
     srcs = ["webnn_delegate_adaptor.cc"],
-    hdrs =  ["webnn_delegate_adaptor.h"],
     deps = [
         ":webnn_delegate",
         "//tensorflow/lite:shared_library",

@@ -2793,7 +2793,7 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
 }  // namespace tflite
 
 TfLiteWebNNDelegateOptions TfLiteWebNNDelegateOptionsDefault() {
-  TfLiteWebNNDelegateOptions options = {2, 0};
+  TfLiteWebNNDelegateOptions options = {2, 2};
   return options;
 }
 
