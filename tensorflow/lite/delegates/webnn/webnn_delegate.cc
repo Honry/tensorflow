@@ -843,6 +843,14 @@ class Subgraph {
     }
   }
 
+  static uint32_t SizeOfShape(const TfLiteIntArray* dims) {
+    uint32_t prod = 1;
+    for (size_t i = 0; i < dims->size; ++i) {
+      prod *= dims->data[i];
+    }
+    return prod;
+  }
+
   static TfLiteStatus VisitNode(
       const emscripten::val& builder, TfLiteContext* context,
       TfLiteRegistration* registration, TfLiteNode* node, int node_index,
@@ -1956,8 +1964,10 @@ class Subgraph {
       TF_LITE_ENSURE(logging_context, webnn_operands.at(filter_tensor_id).as<bool>());
       if (fc_params->keep_num_dims || input_tensor.dims->size != 2) {
         // Reshape input to 2D tensor
-        const int32_t n_inputs = input_channels;
-        std::vector<int32_t> new_input_shape = {-1, n_inputs};
+        const uint32_t n_inputs = input_channels;
+        const uint32_t size_of_input_shape = SizeOfShape(input_tensor.dims);
+        std::vector<uint32_t> new_input_shape =
+            {size_of_input_shape / n_inputs, n_inputs};
         emscripten::val reshaped_input = builder.call<emscripten::val>(
             "reshape", webnn_operands.at(input_tensor_id),
             emscripten::val::array(new_input_shape));
