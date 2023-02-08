@@ -39,6 +39,7 @@ limitations under the License.
 #include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/minimal_logging.h"
 #include "tensorflow/lite/kernels/internal/utils/sparsity_format_converter.h"
+#include "tensorflow/lite/kernels/kernel_util.h"
 
 namespace tflite {
 namespace webnn {
@@ -232,6 +233,10 @@ class Subgraph {
       if (inputs.count(t) != 0 || quasi_static_tensors.count(t) != 0) {
         emscripten::val desc = emscripten::val::object();
         desc.set("type", emscripten::val(datatype));
+        // Workaround for single-value operand as which is not supported in Chromium yet
+        if (dims.size() == 0) {
+          dims = {1};
+        }
         desc.set("dimensions", emscripten::val::array(dims));
 
         emscripten::val operand = emscripten::val::object();
@@ -240,9 +245,18 @@ class Subgraph {
           std::string name = std::to_string(t);
           operand = wnn_builder.call<emscripten::val>("input", name, desc);
         } else {
-          auto data_size = context->tensors[t].bytes / 4;
-          emscripten::val view{ emscripten::typed_memory_view(data_size, static_cast<const float*>(data)) };
-          operand = wnn_builder.call<emscripten::val>("constant", desc, view);
+          if (dims.size() == 0) {
+            // Create a single-value operand from the specified number of the specified type.
+            operand = wnn_builder.call<emscripten::val>(
+                "constant", static_cast<const float*>(data)[0],
+                emscripten::val(datatype));
+          } else {
+            // Create an operand for a graph constant.
+            auto data_size = context->tensors[t].bytes / 4;
+            emscripten::val view{emscripten::typed_memory_view(
+                data_size, static_cast<const float*>(data))};
+            operand = wnn_builder.call<emscripten::val>("constant", desc, view);
+          }
         }
         webnn_operands.insert(std::make_pair(t, operand));
       }
@@ -1447,32 +1461,48 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
         logging_context, axes_tensor, axes_tensor_id, node_index));
 
-    if (axes_tensor.dims->data[0] != 2) {
-      TF_LITE_MAYBE_KERNEL_LOG(
-          logging_context,
-          "unsupported MEAN reduction along %d axes in node %d",
-          axes_tensor.dims->data[0], node_index);
-      return kTfLiteError;
-    }
-
     const int32_t* axes_data =
         reinterpret_cast<const int32_t*>(axes_tensor.data.data);
-    if (std::min(axes_data[0], axes_data[1]) != 1 ||
-        std::max(axes_data[0], axes_data[1]) != 2) {
-      TF_LITE_MAYBE_KERNEL_LOG(logging_context,
-                               "unsupported MEAN reduction along non-spatial "
-                               "axes %d and %d in node %d",
-                               std::min(axes_data[0], axes_data[1]),
-                               std::max(axes_data[0], axes_data[1]),
-                               node_index);
-      return kTfLiteError;
+    const int num_reduction_axes = NumElements(&axes_tensor);
+    switch (num_reduction_axes) {
+      case 1:
+        if (axes_data[0] != 2) {
+          TF_LITE_MAYBE_KERNEL_LOG(
+              logging_context,
+              "unsupported MEAN reduction along non-spatial "
+              "axis %d in node %d",
+              axes_data[0], node_index);
+          return kTfLiteError;
+        }
+        break;
+      case 2:
+        if (std::min(axes_data[0], axes_data[1]) != 1 ||
+            std::max(axes_data[0], axes_data[1]) != 2) {
+          TF_LITE_MAYBE_KERNEL_LOG(
+              logging_context,
+              "unsupported MEAN reduction along non-spatial "
+              "axes %d and %d in node %d",
+              std::min(axes_data[0], axes_data[1]),
+              std::max(axes_data[0], axes_data[1]), node_index);
+          return kTfLiteError;
+        }
+        break;
+      default:
+        TF_LITE_MAYBE_KERNEL_LOG(
+            logging_context,
+            "unsupported MEAN reduction along %d axes in node %d",
+            SizeOfDimension(&axes_tensor, 0), node_index);
+        return kTfLiteError;
     }
 
     const int output_tensor_id = node->outputs->data[0];
     const TfLiteTensor& output_tensor = tensors[output_tensor_id];
     TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
         logging_context, output_tensor, output_tensor_id, node_index));
-    const int expected_output_dims = reducer_params->keep_dims ? 4 : 2;
+    int expected_output_dims = 4;
+    if (!reducer_params->keep_dims) {
+      expected_output_dims -= num_reduction_axes;
+    }
     TF_LITE_ENSURE_STATUS(CheckTensorShape(logging_context, output_tensor,
                                            expected_output_dims,
                                            output_tensor_id));
@@ -1480,21 +1510,27 @@ class Subgraph {
         logging_context, output_tensor, output_tensor_id, node_index));
 
     if (detect_supported_op) {
-      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "reduceMean"));
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "averagePool2d"));
+      if (num_reduction_axes != 2) {
+        TFLITE_LOG_PROD(
+            tflite::TFLITE_LOG_WARNING,
+            "WebNN only support TFLite's mean op with axis = [1, 2], "
+            "will fallback to default delegate.");
+        return kTfLiteError;
+      }
     } else {
-      emscripten::val reduceOptions = emscripten::val::object();
-      std::vector<int32_t> axes;
-      axes.assign(&axes_data[0], &axes_data[0] + axes_tensor.dims->data[0]);
-      reduceOptions.set("axes", emscripten::val::array(axes));
-      reduceOptions.set("keepDimensions", emscripten::val(reducer_params->keep_dims));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(input_tensor_id).as<bool>());
+      emscripten::val pool2dOptions = emscripten::val::object();
+      pool2dOptions.set("layout", emscripten::val("nhwc"));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
 
       webnn_operands.insert(std::make_pair(
           output_tensor_id,
-          builder.call<emscripten::val>("reduceMean",
+          builder.call<emscripten::val>("averagePool2d",
                                         webnn_operands.at(input_tensor_id),
-                                        reduceOptions)));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
+                                        pool2dOptions)));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(output_tensor_id).as<bool>());
     }
 
     return kTfLiteOk;

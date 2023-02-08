@@ -32,6 +32,7 @@ cc_library(
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/schema:schema_fbs",
         "//tensorflow/lite/kernels/internal/utils:sparsity_format_converter",
+        "//tensorflow/lite/kernels:kernel_util",
         "@FP16",
     ],
 )
