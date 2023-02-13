@@ -234,6 +234,7 @@ class Subgraph {
         emscripten::val desc = emscripten::val::object();
         desc.set("type", emscripten::val(datatype));
         // Workaround for single-value operand as which is not supported in Chromium yet
+        // TODO: remove this workaround once it is supported
         if (dims.size() == 0) {
           dims = {1};
         }
@@ -855,14 +856,6 @@ class Subgraph {
       default:
         return kTfLiteOk;
     }
-  }
-
-  static uint32_t SizeOfShape(const TfLiteIntArray* dims) {
-    uint32_t prod = 1;
-    for (size_t i = 0; i < dims->size; ++i) {
-      prod *= dims->data[i];
-    }
-    return prod;
   }
 
   static TfLiteStatus VisitNode(
@@ -1990,8 +1983,8 @@ class Subgraph {
       }
     } else {
       emscripten::val options = emscripten::val::object();
-      options.set("aTranspose", emscripten::val(false));
-      options.set("bTranspose",  emscripten::val(true));
+      options.set("aTranspose", false);
+      options.set("bTranspose",  true);
       if (bias_tensor_id >= 0) {
         TF_LITE_ENSURE(logging_context, webnn_operands.at(bias_tensor_id).as<bool>());
         options.set("c", webnn_operands.at(bias_tensor_id));
@@ -2000,13 +1993,11 @@ class Subgraph {
       TF_LITE_ENSURE(logging_context, webnn_operands.at(filter_tensor_id).as<bool>());
       if (fc_params->keep_num_dims || input_tensor.dims->size != 2) {
         // Reshape input to 2D tensor
-        const uint32_t n_inputs = input_channels;
-        const uint32_t size_of_input_shape = SizeOfShape(input_tensor.dims);
-        std::vector<uint32_t> new_input_shape =
-            {size_of_input_shape / n_inputs, n_inputs};
+        emscripten::val new_input_shape = emscripten::val::array();
+        new_input_shape.call<void>("push", emscripten::val::null());
+        new_input_shape.call<void>("push", input_channels);
         emscripten::val reshaped_input = builder.call<emscripten::val>(
-            "reshape", webnn_operands.at(input_tensor_id),
-            emscripten::val::array(new_input_shape));
+            "reshape", webnn_operands.at(input_tensor_id), new_input_shape);
         emscripten::val gemm = builder.call<emscripten::val>(
             "gemm", reshaped_input, webnn_operands.at(filter_tensor_id),
             options);
