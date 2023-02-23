@@ -1516,12 +1516,18 @@ class Subgraph {
       pool2dOptions.set("layout", emscripten::val("nhwc"));
       TF_LITE_ENSURE(logging_context,
                      webnn_operands.at(input_tensor_id).as<bool>());
+      emscripten::val output = builder.call<emscripten::val>(
+          "averagePool2d", webnn_operands.at(input_tensor_id), pool2dOptions);
+      if (!reducer_params->keep_dims) {
+        // Reshape output to 2D tensor
+        emscripten::val new_output_shape = emscripten::val::array();
+        new_output_shape.call<void>("push", output_tensor.dims->data[0]);
+        new_output_shape.call<void>("push", output_tensor.dims->data[1]);
+        output =
+            builder.call<emscripten::val>("reshape", output, new_output_shape);
+      }
+      webnn_operands.insert(std::make_pair(output_tensor_id, output));
 
-      webnn_operands.insert(std::make_pair(
-          output_tensor_id,
-          builder.call<emscripten::val>("averagePool2d",
-                                        webnn_operands.at(input_tensor_id),
-                                        pool2dOptions)));
       TF_LITE_ENSURE(logging_context,
                      webnn_operands.at(output_tensor_id).as<bool>());
     }
