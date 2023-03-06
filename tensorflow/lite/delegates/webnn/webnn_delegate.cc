@@ -510,6 +510,32 @@ class Subgraph {
       return kTfLiteError;
     }
 
+    if (params->stride_width > params->filter_width) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context,
+          "unsupported width stride %d exceeding filter width %d in node #%d",
+          params->stride_width, params->filter_width, node_index);
+      return kTfLiteError;
+    }
+
+    if (params->stride_height > params->filter_height) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context,
+          "unsupported height stride %d exceeding filter height %d in node #%d",
+          params->stride_height, params->filter_height, node_index);
+      return kTfLiteError;
+    }
+
+    if (params->filter_width == 1 && params->filter_height == 1 &&
+        std::max(params->stride_width, params->stride_height) > 1) {
+      TF_LITE_MAYBE_KERNEL_LOG(context,
+                               "unsupported pooling with 1x1 filter "
+                               "and %dx%d stride in node #%d",
+                               params->stride_width, params->stride_height,
+                               node_index);
+      return kTfLiteError;
+    }
+
     return kTfLiteOk;
   }
 
