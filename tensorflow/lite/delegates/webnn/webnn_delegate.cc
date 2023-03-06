@@ -760,10 +760,9 @@ class Subgraph {
     return kTfLiteOk;
   }
 
-  static emscripten::val BuildClamp(
-      const emscripten::val& builder, const emscripten::val& input,
-      float min_value, float max_value,
-      std::vector<std::unique_ptr<char>>& constant_buffers) {
+  static emscripten::val BuildClamp(const emscripten::val& builder,
+                                    const emscripten::val& input,
+                                    float min_value, float max_value) {
     emscripten::val options = emscripten::val::object();
     options.set("minValue", min_value);
     options.set("maxValue", max_value);
@@ -826,8 +825,7 @@ class Subgraph {
   static TfLiteStatus VisitActivation(
       const emscripten::val& builder, int input_tensor_id, int output_tensor_id,
       TfLiteFusedActivation activation,
-      std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers) {
+      std::unordered_map<int, emscripten::val>& webnn_operands) {
     switch (activation) {
       case kTfLiteActNone:
         return kTfLiteOk;
@@ -837,13 +835,11 @@ class Subgraph {
         return kTfLiteOk;
       case kTfLiteActReluN1To1:
         webnn_operands.at(output_tensor_id) = BuildClamp(
-            builder, webnn_operands.at(input_tensor_id),
-            -1.0f, +1.0f, constant_buffers);
+            builder, webnn_operands.at(input_tensor_id), -1.0f, +1.0f);
         return kTfLiteOk;
       case kTfLiteActRelu6:
-        webnn_operands.at(output_tensor_id) = BuildClamp(
-            builder, webnn_operands.at(input_tensor_id),
-            0.0f, 6.0f, constant_buffers);
+        webnn_operands.at(output_tensor_id) =
+            BuildClamp(builder, webnn_operands.at(input_tensor_id), 0.0f, 6.0f);
         return kTfLiteOk;
       case kTfLiteActTanh:
         webnn_operands.at(output_tensor_id) = builder.call<emscripten::val>(
@@ -872,13 +868,17 @@ class Subgraph {
     // error messages are supressed.
     TfLiteContext* logging_context = detect_supported_op ? nullptr : context;
     switch (registration->builtin_code) {
+      case kTfLiteBuiltinAbs:
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "abs");
       case kTfLiteBuiltinAdd: {
         const TfLiteAddParams* add_params =
             static_cast<const TfLiteAddParams*>(node->builtin_data);
 
         return VisitAddNode(builder, logging_context, node_index, node,
                             context->tensors, add_params, webnn_operands,
-                            constant_buffers, detect_supported_op);
+                            detect_supported_op);
       }
       case kTfLiteBuiltinSub: {
         const TfLiteSubParams* sub_params =
@@ -886,7 +886,7 @@ class Subgraph {
 
         return VisitSubNode(builder, logging_context, node_index, node,
                             context->tensors, sub_params, webnn_operands,
-                            constant_buffers, detect_supported_op);
+                            detect_supported_op);
       }
       case kTfLiteBuiltinMul: {
         const TfLiteMulParams* mul_params =
@@ -894,47 +894,59 @@ class Subgraph {
 
         return VisitMulNode(builder, logging_context, node_index, node,
                             context->tensors, mul_params, webnn_operands,
-                            constant_buffers, detect_supported_op);
+                            detect_supported_op);
       }
+      case kTfLiteBuiltinNeg:
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "neg");
       case kTfLiteBuiltinPad:
         return VisitPadNode(builder, logging_context, node_index, node,
-                            context->tensors, webnn_operands,
-                            constant_buffers, detect_supported_op);
+                            context->tensors, webnn_operands, constant_buffers,
+                            detect_supported_op);
       case kTfLiteBuiltinAveragePool2d: {
         const TfLitePoolParams* pool_params =
             static_cast<const TfLitePoolParams*>(node->builtin_data);
 
         return VisitAveragePool2DNode(builder, logging_context, node_index,
                                       node, context->tensors, pool_params,
-                                      webnn_operands, constant_buffers,
-                                      detect_supported_op);
+                                      webnn_operands, detect_supported_op);
       }
+      case kTfLiteBuiltinCeil:
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "ceil");
       case kTfLiteBuiltinMaxPool2d: {
         const TfLitePoolParams* pool_params =
             static_cast<const TfLitePoolParams*>(node->builtin_data);
 
-        return VisitMaxPool2DNode(builder, logging_context, node_index,
-                                  node, context->tensors, pool_params,
-                                  webnn_operands, constant_buffers,
+        return VisitMaxPool2DNode(builder, logging_context, node_index, node,
+                                  context->tensors, pool_params, webnn_operands,
                                   detect_supported_op);
       }
+      case kTfLiteBuiltinMaximum:
+        return VisitMaximumNode(builder, logging_context, node_index, node,
+                                context->tensors, webnn_operands,
+                                detect_supported_op);
       case kTfLiteBuiltinMean: {
         const TfLiteReducerParams* reducer_params =
             static_cast<const TfLiteReducerParams*>(node->builtin_data);
 
-        return VisitMeanNode(builder, logging_context, node_index,
-                             node, context->tensors, reducer_params,
-                             webnn_operands, constant_buffers,
+        return VisitMeanNode(builder, logging_context, node_index, node,
+                             context->tensors, reducer_params, webnn_operands,
                              detect_supported_op);
       }
+      case kTfLiteBuiltinMinimum:
+        return VisitMinimumNode(builder, logging_context, node_index, node,
+                                context->tensors, webnn_operands,
+                                detect_supported_op);
       case kTfLiteBuiltinConcatenation: {
         const TfLiteConcatenationParams* concat_params =
             static_cast<const TfLiteConcatenationParams*>(node->builtin_data);
 
         return VisitConcatenationNode(builder, logging_context, node_index,
                                       node, context->tensors, concat_params,
-                                      webnn_operands, constant_buffers,
-                                      detect_supported_op);
+                                      webnn_operands, detect_supported_op);
       }
       case kTfLiteBuiltinConv2d: {
         const TfLiteConvParams* conv_params =
@@ -943,7 +955,7 @@ class Subgraph {
         return VisitConv2DNode(builder, logging_context, node_index, node,
                                context->tensors, conv_params,
                                quasi_static_tensors, webnn_operands,
-                               constant_buffers, detect_supported_op);
+                               detect_supported_op);
       }
       case kTfLiteBuiltinDepthwiseConv2d: {
         const TfLiteDepthwiseConvParams* dwconv_params =
@@ -952,7 +964,15 @@ class Subgraph {
         return VisitDepthwiseConv2DNode(builder, logging_context, node_index,
                                         node, context->tensors, dwconv_params,
                                         quasi_static_tensors, webnn_operands,
-                                        constant_buffers, detect_supported_op);
+                                        detect_supported_op);
+      }
+      case kTfLiteBuiltinDiv: {
+        const TfLiteDivParams* div_params =
+            static_cast<const TfLiteDivParams*>(node->builtin_data);
+
+        return VisitDivNode(builder, logging_context, node_index, node,
+                            context->tensors, div_params, webnn_operands,
+                            detect_supported_op);
       }
       case kTfLiteBuiltinFullyConnected: {
         const TfLiteFullyConnectedParams* fc_params =
@@ -961,20 +981,24 @@ class Subgraph {
         return VisitFullyConnectedNode(builder, logging_context, node_index,
                                        node, context->tensors, fc_params,
                                        quasi_static_tensors, webnn_operands,
-                                       constant_buffers, detect_supported_op);
+                                       detect_supported_op);
       }
+      case kTfLiteBuiltinFloor:
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "floor");
       case kTfLiteBuiltinHardSwish:
-        return VisitHardSwishNode(builder, logging_context, node_index, node,
-                                  context->tensors, webnn_operands,
-                                  detect_supported_op);
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "hardSwish");
       case kTfLiteBuiltinLogistic:
-        return VisitLogisticNode(builder, logging_context, node_index, node,
-                                 context->tensors, webnn_operands,
-                                 detect_supported_op);
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "sigmoid");
       case kTfLiteBuiltinRelu:
-        return VisitReluNode(builder, logging_context, node_index, node,
-                             context->tensors, webnn_operands,
-                             detect_supported_op);
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "relu");
       case kTfLiteBuiltinReshape: {
         const TfLiteReshapeParams* reshape_params =
             static_cast<const TfLiteReshapeParams*>(node->builtin_data);
@@ -1008,9 +1032,9 @@ class Subgraph {
                               detect_supported_op);
       }
       case kTfLiteBuiltinTanh:
-        return VisitTanhNode(builder, logging_context, node_index, node,
-                             context->tensors, webnn_operands,
-                             detect_supported_op);
+        return VisitUnaryNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, "tanh");
       case kTfLiteBuiltinUnpack: {
         const TfLiteUnpackParams* unpack_params =
             static_cast<const TfLiteUnpackParams*>(node->builtin_data);
@@ -1043,7 +1067,6 @@ class Subgraph {
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteAddParams* add_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
@@ -1085,9 +1108,9 @@ class Subgraph {
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
 
       if (add_params != nullptr) {
-        TF_LITE_ENSURE_STATUS(VisitActivation(
-            builder, output_tensor_id, output_tensor_id, add_params->activation,
-            webnn_operands, constant_buffers));
+        TF_LITE_ENSURE_STATUS(
+            VisitActivation(builder, output_tensor_id, output_tensor_id,
+                            add_params->activation, webnn_operands));
       }
     }
 
@@ -1099,7 +1122,6 @@ class Subgraph {
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteSubParams* sub_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
@@ -1141,9 +1163,9 @@ class Subgraph {
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
 
       if (sub_params != nullptr) {
-        TF_LITE_ENSURE_STATUS(VisitActivation(
-            builder, output_tensor_id, output_tensor_id, sub_params->activation,
-            webnn_operands, constant_buffers));
+        TF_LITE_ENSURE_STATUS(
+            VisitActivation(builder, output_tensor_id, output_tensor_id,
+                            sub_params->activation, webnn_operands));
       }
     }
 
@@ -1155,7 +1177,6 @@ class Subgraph {
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteMulParams* mul_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
@@ -1196,9 +1217,9 @@ class Subgraph {
                                         webnn_operands.at(input2_tensor_id))));
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
       if (mul_params != nullptr) {
-        TF_LITE_ENSURE_STATUS(VisitActivation(
-            builder, output_tensor_id, output_tensor_id, mul_params->activation,
-            webnn_operands, constant_buffers));
+        TF_LITE_ENSURE_STATUS(
+            VisitActivation(builder, output_tensor_id, output_tensor_id,
+                            mul_params->activation, webnn_operands));
       }
     }
 
@@ -1298,7 +1319,6 @@ class Subgraph {
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLitePoolParams* pool_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
@@ -1354,9 +1374,9 @@ class Subgraph {
       }
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
 
-      TF_LITE_ENSURE_STATUS(VisitActivation(
-          builder, output_tensor_id, output_tensor_id, pool_params->activation,
-          webnn_operands, constant_buffers));
+      TF_LITE_ENSURE_STATUS(
+          VisitActivation(builder, output_tensor_id, output_tensor_id,
+                          pool_params->activation, webnn_operands));
     }
 
     return kTfLiteOk;
@@ -1367,7 +1387,6 @@ class Subgraph {
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLitePoolParams* pool_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
@@ -1417,9 +1436,53 @@ class Subgraph {
                                         options)));
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
 
-      TF_LITE_ENSURE_STATUS(VisitActivation(
-          builder, output_tensor_id, output_tensor_id, pool_params->activation,
-          webnn_operands, constant_buffers));
+      TF_LITE_ENSURE_STATUS(
+          VisitActivation(builder, output_tensor_id, output_tensor_id,
+                          pool_params->activation, webnn_operands));
+    }
+
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus VisitMaximumNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
+
+    const int input1_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input1_tensor = tensors[input1_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+
+    const int input2_tensor_id = node->inputs->data[1];
+    const TfLiteTensor& input2_tensor = tensors[input2_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "max"));
+    } else {
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input1_tensor_id).as<bool>());
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input2_tensor_id).as<bool>());
+      webnn_operands.insert(std::make_pair(output_tensor_id,
+          builder.call<emscripten::val>("max",
+                                        webnn_operands.at(input1_tensor_id),
+                                        webnn_operands.at(input2_tensor_id))));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
     }
 
     return kTfLiteOk;
@@ -1430,7 +1493,6 @@ class Subgraph {
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteReducerParams* reducer_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
@@ -1535,12 +1597,55 @@ class Subgraph {
     return kTfLiteOk;
   }
 
+  static TfLiteStatus VisitMinimumNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
+
+    const int input1_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input1_tensor = tensors[input1_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+
+    const int input2_tensor_id = node->inputs->data[1];
+    const TfLiteTensor& input2_tensor = tensors[input2_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "min"));
+    } else {
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input1_tensor_id).as<bool>());
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input2_tensor_id).as<bool>());
+      webnn_operands.insert(std::make_pair(output_tensor_id,
+          builder.call<emscripten::val>("min",
+                                        webnn_operands.at(input1_tensor_id),
+                                        webnn_operands.at(input2_tensor_id))));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
+    }
+
+    return kTfLiteOk;
+  }
+
   static TfLiteStatus VisitConcatenationNode(
       const emscripten::val& builder, TfLiteContext* logging_context,
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteConcatenationParams* concat_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     size_t input_size = node->inputs->size;
     const TfLiteTensor& first_input_tensor = tensors[node->inputs->data[0]];
@@ -1571,7 +1676,6 @@ class Subgraph {
       const TfLiteConvParams* conv_params,
       const std::unordered_set<int>& quasi_static_tensors,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckConvolutionParams(logging_context, conv_params, node_index));
@@ -1758,7 +1862,6 @@ class Subgraph {
       const TfLiteDepthwiseConvParams* dwconv_params,
       const std::unordered_set<int>& quasi_static_tensors,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 3, 1, node_index));
@@ -1853,13 +1956,67 @@ class Subgraph {
     return kTfLiteOk;
   }
 
+  static TfLiteStatus VisitDivNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      const TfLiteDivParams* div_params,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
+
+    const int input1_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input1_tensor = tensors[input1_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input1_tensor, input1_tensor_id, node_index));
+
+    const int input2_tensor_id = node->inputs->data[1];
+    const TfLiteTensor& input2_tensor = tensors[input2_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input2_tensor, input2_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "div"));
+      if (div_params != nullptr) {
+        TF_LITE_ENSURE_STATUS(
+            CheckActivation(builder, node_index, div_params->activation));
+      }
+    } else {
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input1_tensor_id).as<bool>());
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input2_tensor_id).as<bool>());
+      webnn_operands.insert(std::make_pair(output_tensor_id,
+          builder.call<emscripten::val>("div",
+                                        webnn_operands.at(input1_tensor_id),
+                                        webnn_operands.at(input2_tensor_id))));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
+
+      if (div_params != nullptr) {
+        TF_LITE_ENSURE_STATUS(
+            VisitActivation(builder, output_tensor_id, output_tensor_id,
+                            div_params->activation, webnn_operands));
+      }
+    }
+
+    return kTfLiteOk;
+  }
+
   static TfLiteStatus VisitFullyConnectedNode(
       const emscripten::val& builder, TfLiteContext* logging_context,
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       const TfLiteFullyConnectedParams* fc_params,
       const std::unordered_set<int>& quasi_static_tensors,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckFullyConnectedParams(logging_context, fc_params, node_index));
@@ -2025,111 +2182,9 @@ class Subgraph {
       }
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
 
-      TF_LITE_ENSURE_STATUS(VisitActivation(
-          builder, output_tensor_id, output_tensor_id, fc_params->activation,
-          webnn_operands, constant_buffers));
-    }
-
-    return kTfLiteOk;
-  }
-
-  static TfLiteStatus VisitHardSwishNode(
-      const emscripten::val& builder, TfLiteContext* logging_context,
-      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
-      std::unordered_map<int, emscripten::val>& webnn_operands,
-      const bool detect_supported_op) {
-    TF_LITE_ENSURE_STATUS(
-        CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
-
-    const TfLiteTensor& input_tensor = tensors[node->inputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
-    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
-
-    const TfLiteTensor& output_tensor = tensors[node->outputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
-    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
-
-    if (detect_supported_op) {
-      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "hardSwish"));
-    } else {
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->inputs->data[0]).as<bool>());
-      webnn_operands.insert(std::make_pair(
-          node->outputs->data[0],
-          builder.call<emscripten::val>(
-              "hardSwish", webnn_operands.at(node->inputs->data[0]))));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->outputs->data[0]).as<bool>());
-    }
-
-    return kTfLiteOk;
-  }
-
-  static TfLiteStatus VisitLogisticNode(
-      const emscripten::val& builder, TfLiteContext* logging_context,
-      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
-      std::unordered_map<int, emscripten::val>& webnn_operands,
-      const bool detect_supported_op) {
-    TF_LITE_ENSURE_STATUS(
-        CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
-
-    const TfLiteTensor& input_tensor = tensors[node->inputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
-    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
-
-    const TfLiteTensor& output_tensor = tensors[node->outputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
-    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
-
-    if (detect_supported_op) {
-      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "sigmoid"));
-    } else {
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->inputs->data[0]).as<bool>());
-      webnn_operands.insert(std::make_pair(
-          node->outputs->data[0],
-          builder.call<emscripten::val>(
-              "sigmoid", webnn_operands.at(node->inputs->data[0]))));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->outputs->data[0]).as<bool>());
-    }
-
-    return kTfLiteOk;
-  }
-
-  static TfLiteStatus VisitReluNode(
-      const emscripten::val& builder, TfLiteContext* logging_context,
-      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
-      std::unordered_map<int, emscripten::val>& webnn_operands,
-      const bool detect_supported_op) {
-    TF_LITE_ENSURE_STATUS(
-        CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
-
-    const TfLiteTensor& input_tensor = tensors[node->inputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
-    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
-
-    const TfLiteTensor& output_tensor = tensors[node->outputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
-    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
-
-    if (detect_supported_op) {
-      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "relu"));
-    } else {
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->inputs->data[0]).as<bool>());
-      webnn_operands.insert(std::make_pair(
-          node->outputs->data[0],
-          builder.call<emscripten::val>(
-              "relu", webnn_operands.at(node->inputs->data[0]))));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->outputs->data[0]).as<bool>());
+      TF_LITE_ENSURE_STATUS(
+          VisitActivation(builder, output_tensor_id, output_tensor_id,
+                          fc_params->activation, webnn_operands));
     }
 
     return kTfLiteOk;
@@ -2418,35 +2473,36 @@ class Subgraph {
     return kTfLiteOk;
   }
 
-  static TfLiteStatus VisitTanhNode(
+  static TfLiteStatus VisitUnaryNode(
       const emscripten::val& builder, TfLiteContext* logging_context,
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      const bool detect_supported_op) {
+      const bool detect_supported_op, const std::string unary_node_name) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
 
-    const TfLiteTensor& input_tensor = tensors[node->inputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
+    const int input_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input_tensor = tensors[input_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input_tensor, input_tensor_id, node_index));
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, input_tensor, node->inputs->data[0], node_index));
+        logging_context, input_tensor, input_tensor_id, node_index));
 
-    const TfLiteTensor& output_tensor = tensors[node->outputs->data[0]];
-    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
-        logging_context, output_tensor, node->outputs->data[0], node_index));
+        logging_context, output_tensor, output_tensor_id, node_index));
 
     if (detect_supported_op) {
-      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "tanh"));
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, unary_node_name));
     } else {
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->inputs->data[0]).as<bool>());
-      webnn_operands.insert(std::make_pair(
-          node->outputs->data[0],
-          builder.call<emscripten::val>(
-              "tanh", webnn_operands.at(node->inputs->data[0]))));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->outputs->data[0]).as<bool>());
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(input_tensor_id).as<bool>());
+      webnn_operands.insert(std::make_pair(output_tensor_id,
+          builder.call<emscripten::val>(unary_node_name.c_str(),
+                                        webnn_operands.at(input_tensor_id))));
+      TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
     }
 
     return kTfLiteOk;
