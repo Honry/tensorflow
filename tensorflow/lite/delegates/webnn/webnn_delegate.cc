@@ -2611,14 +2611,21 @@ class Subgraph {
 
     const int32_t* perm_data =
         reinterpret_cast<const int32_t*>(perm_tensor.data.data);
+    const int dims_count = NumDimensions(&input_tensor);
+    std::vector<uint32_t> perm;
+    for (int i = 0; i < dims_count; i++) {
+      if (perm_data[i] < 0) {
+        TF_LITE_MAYBE_KERNEL_LOG(logging_context, "invalid perm data %d in node %d",
+                                 perm_data[i], node_index);
+        return kTfLiteError;
+      }
+      perm.push_back(static_cast<uint32_t>(perm_data[i]));
+    }
 
     const int output_tensor_id = node->outputs->data[0];
     const TfLiteTensor& output_tensor = tensors[output_tensor_id];
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, output_tensor_id, node_index));
-    const int dims_count = NumDimensions(&input_tensor);
-    std::vector<int32_t> perm;
-    perm.insert(perm.end(), &perm_data[0], &perm_data[dims_count]);
 
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "transpose"));
