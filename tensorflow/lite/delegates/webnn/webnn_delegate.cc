@@ -3096,6 +3096,11 @@ TfLiteIntArray* Delegate::PrepareOpsToDelegate(TfLiteContext* context) {
             &nodes_to_delegate->data[0]);
 #endif
 
+  TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
+                       "TensorFlow Lite WebNN delegate capability:"
+                       " number of nodes in the graph: %d,"
+                       " number of nodes supported by WebNN: %d.",
+                       execution_plan->size, nodes_to_delegate->size);
   return nodes_to_delegate;
 }
 
