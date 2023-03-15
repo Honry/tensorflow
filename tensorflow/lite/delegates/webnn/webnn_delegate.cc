@@ -169,6 +169,14 @@ class Subgraph {
             tensors[t] = t;
           }
           break;
+        case kTfLiteBuiltinTranspose:
+          // Ignore the second input (perm), as it is represented as
+          // parameters of the WebNN operator rather than extra input.
+          {
+            const int t = node->inputs->data[0];
+            tensors[t] = t;
+            break;
+          }
         default:
           // All other operators: process all inputs
           for (int k = 0; k < node->inputs->size; k++) {
@@ -1025,6 +1033,14 @@ class Subgraph {
         return VisitUnaryNode(builder, logging_context, node_index, node,
                               context->tensors, webnn_operands,
                               detect_supported_op, "relu");
+      case kTfLiteBuiltinReluN1To1:
+        return VisitClampNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, -1.0f, +1.0f);
+      case kTfLiteBuiltinRelu6:
+        return VisitClampNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op, 0.0f, 6.0f);
       case kTfLiteBuiltinReshape: {
         const TfLiteReshapeParams* reshape_params =
             static_cast<const TfLiteReshapeParams*>(node->builtin_data);
@@ -1061,6 +1077,10 @@ class Subgraph {
         return VisitUnaryNode(builder, logging_context, node_index, node,
                               context->tensors, webnn_operands,
                               detect_supported_op, "tanh");
+      case kTfLiteBuiltinTranspose:
+        return VisitTransposeNode(builder, logging_context, node_index, node,
+                                  context->tensors, webnn_operands,
+                                  detect_supported_op);
       case kTfLiteBuiltinUnpack: {
         const TfLiteUnpackParams* unpack_params =
             static_cast<const TfLiteUnpackParams*>(node->builtin_data);
@@ -2216,6 +2236,44 @@ class Subgraph {
     return kTfLiteOk;
   }
 
+  static TfLiteStatus VisitClampNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op, float min_value, float max_value) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 1, 1, node_index));
+
+    const int input_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input_tensor = tensors[input_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, input_tensor, input_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input_tensor, input_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "clamp"));
+    } else {
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
+      webnn_operands.insert(
+          std::make_pair(output_tensor_id,
+                         BuildClamp(builder, webnn_operands.at(input_tensor_id),
+                                    min_value, max_value)));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(output_tensor_id).as<bool>());
+    }
+
+    return kTfLiteOk;
+  }
+
   static TfLiteStatus VisitReshapeNode(
       const emscripten::val& builder, TfLiteContext* logging_context,
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
@@ -2529,6 +2587,59 @@ class Subgraph {
           builder.call<emscripten::val>(unary_node_name.c_str(),
                                         webnn_operands.at(input_tensor_id))));
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
+    }
+
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus VisitTransposeNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
+
+    const int input_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input_tensor = tensors[input_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input_tensor, input_tensor_id, node_index));
+
+    const TfLiteTensor& perm_tensor = tensors[node->inputs->data[1]];
+    TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
+        logging_context, perm_tensor, node->inputs->data[1], node_index));
+
+    const int32_t* perm_data =
+        reinterpret_cast<const int32_t*>(perm_tensor.data.data);
+    const int dims_count = NumDimensions(&input_tensor);
+    std::vector<uint32_t> perm;
+    for (int i = 0; i < dims_count; i++) {
+      if (perm_data[i] < 0) {
+        TF_LITE_MAYBE_KERNEL_LOG(logging_context, "invalid perm data %d in node %d",
+                                 perm_data[i], node_index);
+        return kTfLiteError;
+      }
+      perm.push_back(static_cast<uint32_t>(perm_data[i]));
+    }
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "transpose"));
+    } else {
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
+      emscripten::val options = emscripten::val::object();
+      options.set("permutation", emscripten::val::array(perm));
+      webnn_operands.insert(std::make_pair(
+          output_tensor_id,
+          builder.call<emscripten::val>(
+              "transpose", webnn_operands.at(input_tensor_id), options)));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(output_tensor_id).as<bool>());
     }
 
     return kTfLiteOk;
