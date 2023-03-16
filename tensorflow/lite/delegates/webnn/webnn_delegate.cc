@@ -272,8 +272,6 @@ class Subgraph {
     }
 
     // Create WebNN nodes for TFLite delegate nodes
-    // keep the buffers of constants created during graph building.
-    std::vector<std::unique_ptr<char>> constant_buffers;
     for (int i = 0; i < params->nodes_to_replace->size; i++) {
       const int node_index = params->nodes_to_replace->data[i];
       if (delegate->static_unpack_nodes_.count(node_index)) {
@@ -290,8 +288,7 @@ class Subgraph {
       }
 
       if (VisitNode(wnn_builder, context, registration, node, node_index,
-                    quasi_static_tensors, webnn_operands, constant_buffers,
-                    false) != kTfLiteOk) {
+                    quasi_static_tensors, webnn_operands, false) != kTfLiteOk) {
         return nullptr;
       }
     }
@@ -893,7 +890,6 @@ class Subgraph {
       TfLiteRegistration* registration, TfLiteNode* node, int node_index,
       const std::unordered_set<int>& quasi_static_tensors,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     // TFLite context used for logging purposes. When we create a new node
     // (detect_supported_op is false), logging context is the same as context,
@@ -936,7 +932,7 @@ class Subgraph {
                               detect_supported_op, "neg");
       case kTfLiteBuiltinPad:
         return VisitPadNode(builder, logging_context, node_index, node,
-                            context->tensors, webnn_operands, constant_buffers,
+                            context->tensors, webnn_operands,
                             detect_supported_op);
       case kTfLiteBuiltinAveragePool2d: {
         const TfLitePoolParams* pool_params =
@@ -1276,7 +1272,6 @@ class Subgraph {
       const emscripten::val& builder, TfLiteContext* logging_context,
       int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
       std::unordered_map<int, emscripten::val>& webnn_operands,
-      std::vector<std::unique_ptr<char>>& constant_buffers,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
         CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
@@ -1331,29 +1326,20 @@ class Subgraph {
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "pad"));
     } else {
-      size_t rank = paddings_tensor.dims->data[0];
-      std::vector<int32_t> padding(rank * 2);
-      for (int i = 0; i < rank; i++) {
-        padding[i * 2 + 0] = static_cast<int32_t>(paddings_data[i * 2 + 0]);
-        padding[i * 2 + 1] = static_cast<int32_t>(paddings_data[i * 2 + 1]);
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
+      emscripten::val beginning_padding = emscripten::val::array();
+      emscripten::val ending_padding = emscripten::val::array();
+      for (int i = 0; i < paddings_tensor.dims->data[0]; i++) {
+        beginning_padding.call<void>(
+            "push", static_cast<uint32_t>(paddings_data[i * 2 + 0]));
+        ending_padding.call<void>(
+            "push", static_cast<uint32_t>(paddings_data[i * 2 + 1]));
       }
-      const size_t padding_buffer_length = sizeof(int32_t) * padding.size();
-      std::unique_ptr<char> padding_buffer(new char[padding_buffer_length]);
-      std::memcpy(padding_buffer.get(), padding.data(), padding_buffer_length);
-      std::vector<int32_t> dims = {static_cast<int32_t>(rank), 2};
-      emscripten::val desc = emscripten::val::object();
-      desc.set("type", emscripten::val("int32"));
-      desc.set("dimensions", emscripten::val::array(dims));
-
-      emscripten::val view{ emscripten::typed_memory_view(padding.size(), padding.data()) };
-      emscripten::val padding_operand = builder.call<emscripten::val>("constant", desc, view);
-      constant_buffers.push_back(std::move(padding_buffer));
-
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(input_tensor_id).as<bool>());
-      webnn_operands.insert(std::make_pair(output_tensor_id,
-          builder.call<emscripten::val>("pad",
-                                        webnn_operands.at(input_tensor_id),
-                                        padding_operand)));
+      webnn_operands.insert(std::make_pair(
+          output_tensor_id, builder.call<emscripten::val>(
+                                "pad", webnn_operands.at(input_tensor_id),
+                                beginning_padding, ending_padding)));
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
     }
 
@@ -2870,11 +2856,9 @@ TfLiteIntArray* Delegate::PrepareOpsToDelegate(TfLiteContext* context) {
       return nullptr;
     }
     std::unordered_map<int, emscripten::val> empty_webnn_operands;
-    std::vector<std::unique_ptr<char>> empty_buffers;
     if (Subgraph::VisitNode(wnn_builder, context, registration, node,
                             node_index, quasi_static_tensors,
-                            empty_webnn_operands, empty_buffers,
-                            true) != kTfLiteOk) {
+                            empty_webnn_operands, true) != kTfLiteOk) {
       // If a non-delegated node consumes output of a node that unpacks static
       // data, that node shouldn't be delegated.
       for (int j = 0; j < node->inputs->size; j++) {
