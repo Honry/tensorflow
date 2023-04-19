@@ -778,6 +778,24 @@ class Subgraph {
     return kTfLiteOk;
   }
 
+  static TfLiteStatus CheckTensorsDimensionMatch(
+      TfLiteContext* context, const TfLiteTensor& input_tensor,
+      const TfLiteTensor& output_tensor, int dimension_index, int node_index,
+      const char* op_name) {
+    if (SizeOfDimension(&input_tensor, dimension_index) !=
+        SizeOfDimension(&output_tensor, dimension_index)) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context,
+          "mismatch in shape dimension %d (%d != %d) in input and output "
+          "tensors of %s operator #%d",
+          dimension_index, SizeOfDimension(&input_tensor, dimension_index),
+          SizeOfDimension(&output_tensor, dimension_index), op_name,
+          node_index);
+      return kTfLiteError;
+    }
+    return kTfLiteOk;
+  }
+
   // Check if WebNN op is supported on current platform
   static TfLiteStatus CheckWebNNOpSupport(
       const emscripten::val builder, const std::string op_name) {
@@ -1679,25 +1697,70 @@ class Subgraph {
       const TfLiteConcatenationParams* concat_params,
       std::unordered_map<int, emscripten::val>& webnn_operands,
       const bool detect_supported_op) {
-    size_t input_size = node->inputs->size;
-    const TfLiteTensor& first_input_tensor = tensors[node->inputs->data[0]];
-    uint32_t axis = concat_params->axis < 0
-                     ? first_input_tensor.dims->size + concat_params->axis
-                     : concat_params->axis;
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 4, 1, node_index));
+    const int num_inputs = NumInputs(node);
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    // Check dimensions
+    int axis = concat_params->axis;
+    if (axis < 0) axis += NumDimensions(&output_tensor);
+    int sum_axis = 0;
+
+    for (int i = 0; i < num_inputs; i++) {
+      const TfLiteTensor& input_tensor = tensors[node->inputs->data[i]];
+      TF_LITE_ENSURE_STATUS(CheckTensorFloat32OrQInt8Type(
+          logging_context, input_tensor, node->inputs->data[i], node_index));
+      TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+          logging_context, input_tensor, node->inputs->data[i], node_index));
+
+      TF_LITE_ENSURE_EQ(logging_context, NumDimensions(&input_tensor),
+                        NumDimensions(&output_tensor));
+
+      for (int d = 0; d < NumDimensions(&output_tensor); d++) {
+        // All dimensions must match except the 'axis'.
+        if (d == axis) {
+          continue;
+        }
+        const TfLiteTensor& input_tensor = tensors[node->inputs->data[i]];
+        TF_LITE_ENSURE_STATUS(CheckTensorsDimensionMatch(
+            logging_context, input_tensor, output_tensor, d, node_index,
+            "CONCATENATE"));
+      }
+      sum_axis += SizeOfDimension(&input_tensor, axis);
+    }
+
+    if (SizeOfDimension(&output_tensor, axis) != sum_axis) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          logging_context,
+          "mismatch in axis dimension %d (%d != %d) in output and input"
+          "tensors of CONCATENATE operator #%d",
+          axis, SizeOfDimension(&output_tensor, axis), sum_axis, node_index);
+      return kTfLiteError;
+    }
 
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "concat"));
     } else {
       emscripten::val input_operands = emscripten::val::array();
-      for (size_t i = 0; i < input_size; ++i) {
-        TF_LITE_ENSURE(logging_context, webnn_operands.at(node->inputs->data[i]).as<bool>());
-        input_operands.call<void>("push", webnn_operands.at(node->inputs->data[i]));
+      for (size_t i = 0; i < num_inputs; ++i) {
+        TF_LITE_ENSURE(logging_context,
+                       webnn_operands.at(node->inputs->data[i]).as<bool>());
+        input_operands.call<void>("push",
+                                  webnn_operands.at(node->inputs->data[i]));
       }
       webnn_operands.insert(
           std::make_pair(node->outputs->data[0],
                          builder.call<emscripten::val>("concat", input_operands,
-                                                       emscripten::val(axis))));
-      TF_LITE_ENSURE(logging_context, webnn_operands.at(node->outputs->data[0]).as<bool>());
+                                                       static_cast<uint32_t>(axis))));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(node->outputs->data[0]).as<bool>());
     }
     return kTfLiteOk;
   }
