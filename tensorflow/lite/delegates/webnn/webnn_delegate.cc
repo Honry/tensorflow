@@ -38,6 +38,7 @@ limitations under the License.
 #include "tensorflow/lite/c/builtin_op_data.h"
 #include "tensorflow/lite/c/common.h"
 #include "tensorflow/lite/minimal_logging.h"
+#include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
 #include "tensorflow/lite/kernels/internal/utils/sparsity_format_converter.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
 
@@ -180,6 +181,11 @@ class Subgraph {
         default:
           // All other operators: process all inputs
           for (int k = 0; k < node->inputs->size; k++) {
+            if (registration->builtin_code == kTfLiteBuiltinTransposeConv &&
+                k == 0) {
+              // Ignore the output size parameter (see above).
+              continue;
+            }
             const int t = node->inputs->data[k];
             if (t >= 0) {
               tensors[t] = t;
@@ -453,7 +459,7 @@ class Subgraph {
     return kTfLiteOk;
   }
 
-  static TfLiteStatus CheckMediaPipeTransposedConvolutionParams(
+  static TfLiteStatus CheckTransposedConvolutionParams(
       TfLiteContext* context, const TfLiteTransposeConvParams* params,
       int node_index) {
     if (params->stride_width <= 0) {
@@ -1103,6 +1109,15 @@ class Subgraph {
         return VisitTransposeNode(builder, logging_context, node_index, node,
                                   context->tensors, webnn_operands,
                                   detect_supported_op);
+      case kTfLiteBuiltinTransposeConv: {
+        const TfLiteTransposeConvParams* deconv_params =
+            static_cast<const TfLiteTransposeConvParams*>(node->builtin_data);
+
+        return VisitTransposeConvNode(builder, logging_context, node_index,
+                                      node, context->tensors, deconv_params,
+                                      quasi_static_tensors, webnn_operands,
+                                      detect_supported_op);
+      }
       case kTfLiteBuiltinUnpack: {
         const TfLiteUnpackParams* unpack_params =
             static_cast<const TfLiteUnpackParams*>(node->builtin_data);
@@ -1119,7 +1134,7 @@ class Subgraph {
                       node->custom_initial_data_size);
 
           return VisitMediaPipeDeconvolutionNode(
-              builder, context, node_index, node, context->tensors,
+              builder, logging_context, node_index, node, context->tensors,
               &deconv_params, quasi_static_tensors, webnn_operands,
               detect_supported_op);
         }
@@ -1967,7 +1982,7 @@ class Subgraph {
     const int kernel_width = filter_tensor.dims->data[2];
     const int input_channels = filter_tensor.dims->data[3];
 
-    TF_LITE_ENSURE_STATUS(CheckMediaPipeTransposedConvolutionParams(
+    TF_LITE_ENSURE_STATUS(CheckTransposedConvolutionParams(
         logging_context, deconv_params, node_index));
 
     std::string auto_pad;
@@ -2736,6 +2751,146 @@ class Subgraph {
           output_tensor_id,
           builder.call<emscripten::val>(
               "transpose", webnn_operands.at(input_tensor_id), options)));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(output_tensor_id).as<bool>());
+    }
+
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus VisitTransposeConvNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      const TfLiteTransposeConvParams* deconv_params,
+      const std::unordered_set<int>& quasi_static_tensors,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node,
+                                 /*min_num_inputs=*/3, /*max_num_inputs=*/4,
+                                 /*expected_num_outputs=*/1, node_index));
+    const bool use_bias = node->inputs->size >= 4;
+
+    const int output_shape_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& output_shape_tensor = tensors[output_shape_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorType(logging_context, output_shape_tensor,
+                                          kTfLiteInt32, output_shape_tensor_id,
+                                          node_index));
+    TF_LITE_ENSURE_STATUS(
+        CheckShapeTensorShape(logging_context, output_shape_tensor,
+                              output_shape_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(
+        CheckTensorStaticAllocation(logging_context, output_shape_tensor,
+                                    output_shape_tensor_id, node_index));
+    const int output_shape_dims = SizeOfDimension(&output_shape_tensor, 0);
+    if (output_shape_dims != 4) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          logging_context,
+          "unsupported number of output shape dimensions (%d) in node #%d: "
+          "4 dimensions expected",
+          output_shape_dims, node_index);
+      return kTfLiteError;
+    }
+
+    const int filter_tensor_id = node->inputs->data[1];
+    const TfLiteTensor& filter_tensor = tensors[filter_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
+        logging_context, filter_tensor, filter_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(
+        CheckTensorShape(logging_context, filter_tensor, 4, filter_tensor_id));
+    if (quasi_static_tensors.count(filter_tensor_id) == 0) {
+      TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
+          logging_context, filter_tensor, filter_tensor_id, node_index));
+    }
+
+    const int input_tensor_id = node->inputs->data[2];
+    const TfLiteTensor& input_tensor = tensors[input_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
+        logging_context, input_tensor, input_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(
+        CheckTensorShape(logging_context, input_tensor, 4, input_tensor_id));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input_tensor, input_tensor_id, node_index));
+
+    if (use_bias) {
+      const int bias_tensor_id = node->inputs->data[3];
+      if (bias_tensor_id != kTfLiteOptionalTensor) {
+        const TfLiteTensor& bias_tensor = tensors[bias_tensor_id];
+        TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
+            logging_context, bias_tensor, bias_tensor_id, node_index));
+        TF_LITE_ENSURE_STATUS(
+            CheckTensorShape(logging_context, bias_tensor, 1, bias_tensor_id));
+        if (quasi_static_tensors.count(bias_tensor_id) == 0) {
+          TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
+              logging_context, bias_tensor, bias_tensor_id, node_index));
+        }
+      }
+    }
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(
+        CheckTensorShape(logging_context, output_tensor, 4, output_tensor_id));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    const int* input_tensor_dims = input_tensor.dims->data;
+    const int* filter_tensor_dims = filter_tensor.dims->data;
+    const int output_channels = filter_tensor_dims[0];
+    const int input_channels = filter_tensor_dims[3];
+
+    const int32_t* output_shape = GetTensorData<int32_t>(&output_shape_tensor);
+    if (output_channels != output_shape[3]) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          logging_context,
+          "transpose convolution kernel output channel dimension (%d) "
+          "doesn't match output shape channel dimension (%d) in node #%d: "
+          "4 dimensions expected",
+          output_channels, output_shape[3], node_index);
+    }
+    if (input_channels != input_tensor_dims[3]) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          logging_context,
+          "transpose convolution kernel input channel dimension (%d) "
+          "doesn't match filter input channel (%d) in node #%d",
+          input_channels, input_tensor_dims[3]);
+      return kTfLiteError;
+    }
+
+    TF_LITE_ENSURE_STATUS(CheckTransposedConvolutionParams(
+        logging_context, deconv_params, node_index));
+
+    std::string auto_pad;
+    TF_LITE_ENSURE_STATUS(CalculatePadding(
+        logging_context, deconv_params->padding, auto_pad, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "convTranspose2d"));
+    } else {
+      emscripten::val options = emscripten::val::object();
+      options.set("autoPad", emscripten::val(auto_pad));
+      std::vector<int32_t> strides = {deconv_params->stride_height,
+                                      deconv_params->stride_width};
+      options.set("strides", emscripten::val::array(strides));
+      options.set("inputLayout", emscripten::val("nhwc"));
+      options.set("filterLayout", emscripten::val("ohwi"));
+      std::vector<int32_t> output_sizes = {output_shape[1], output_shape[2]};
+      options.set("outputSizes", emscripten::val::array(output_sizes));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(filter_tensor_id).as<bool>());
+      if (use_bias) {
+        TF_LITE_ENSURE(logging_context,
+                       webnn_operands.at(node->inputs->data[3]).as<bool>());
+        options.set("bias", webnn_operands.at(node->inputs->data[3]));
+      }
+      emscripten::val output = builder.call<emscripten::val>(
+          "convTranspose2d", webnn_operands.at(input_tensor_id),
+          webnn_operands.at(filter_tensor_id), options);
+      webnn_operands.insert(std::make_pair(output_tensor_id, output));
       TF_LITE_ENSURE(logging_context,
                      webnn_operands.at(output_tensor_id).as<bool>());
     }
