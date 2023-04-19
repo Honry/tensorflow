@@ -1039,6 +1039,14 @@ class Subgraph {
         return VisitUnaryNode(builder, logging_context, node_index, node,
                               context->tensors, webnn_operands,
                               detect_supported_op, "hardSwish");
+      case kTfLiteBuiltinLeakyRelu: {
+        const TfLiteLeakyReluParams* leaky_relu_params =
+            static_cast<const TfLiteLeakyReluParams*>(node->builtin_data);
+
+        return VisitLeakyReluNode(builder, logging_context, node_index, node,
+                                  context->tensors, leaky_relu_params,
+                                  webnn_operands, detect_supported_op);
+      }
       case kTfLiteBuiltinLogistic:
         return VisitUnaryNode(builder, logging_context, node_index, node,
                               context->tensors, webnn_operands,
@@ -1281,6 +1289,47 @@ class Subgraph {
             VisitActivation(builder, output_tensor_id, output_tensor_id,
                             mul_params->activation, webnn_operands));
       }
+    }
+
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus VisitLeakyReluNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      const TfLiteLeakyReluParams* leaky_relu_params,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(CheckNumInputsAndOutputs(
+        logging_context, node, 1, 1, node_index));
+
+    const int input_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input_tensor = tensors[input_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
+        logging_context, input_tensor, input_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input_tensor, input_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(
+        logging_context, output_tensor, output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "leakyRelu"));
+    } else {
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
+      emscripten::val options = emscripten::val::object();
+      options.set("alpha", leaky_relu_params->alpha);
+      webnn_operands.insert(std::make_pair(
+          output_tensor_id,
+          builder.call<emscripten::val>(
+              "leakyRelu", webnn_operands.at(input_tensor_id), options)));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(output_tensor_id).as<bool>());
     }
 
     return kTfLiteOk;
