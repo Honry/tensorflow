@@ -1762,7 +1762,7 @@ class Subgraph {
       std::unordered_map<int, emscripten::val>& webnn_operands,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
-        CheckNumInputsAndOutputs(logging_context, node, 2, 4, 1, node_index));
+        CheckNumInputsAndOutputs(logging_context, node, 1, 4, 1, node_index));
     const int num_inputs = NumInputs(node);
 
     const int output_tensor_id = node->outputs->data[0];
