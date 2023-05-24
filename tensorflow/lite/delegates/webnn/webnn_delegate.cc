@@ -1762,7 +1762,7 @@ class Subgraph {
       std::unordered_map<int, emscripten::val>& webnn_operands,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
-        CheckNumInputsAndOutputs(logging_context, node, 2, 4, 1, node_index));
+        CheckNumInputsAndOutputs(logging_context, node, 1, 4, 1, node_index));
     const int num_inputs = NumInputs(node);
 
     const int output_tensor_id = node->outputs->data[0];
@@ -2564,15 +2564,34 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, output_tensor_id, node_index));
 
+    std::vector<int32_t> input_shape;
+    input_shape.assign(&input_tensor.dims->data[0],
+                       &input_tensor.dims->data[0] + input_tensor.dims->size);
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "softmax"));
     } else {
       TF_LITE_ENSURE(logging_context,
                      webnn_operands.at(input_tensor_id).as<bool>());
-      webnn_operands.insert(
-          std::make_pair(output_tensor_id,
-                         builder.call<emscripten::val>(
-                             "softmax", webnn_operands.at(input_tensor_id))));
+      emscripten::val output = emscripten::val::object();
+      // WebNN Softmax only support 2d input shape, reshape input to 2d.
+      if (input_shape.size() != 2) {
+        emscripten::val new_shape = emscripten::val::array();
+        new_shape.call<void>("push", emscripten::val::null());
+        new_shape.call<void>("push", input_shape.back());
+
+        emscripten::val reshape = builder.call<emscripten::val>(
+            "reshape", webnn_operands.at(input_tensor_id), new_shape);
+        emscripten::val softmax =
+            builder.call<emscripten::val>("softmax", reshape);
+        // Reshape the output to the same shape of input.
+        output = builder.call<emscripten::val>(
+            "reshape", softmax, emscripten::val::array(input_shape));
+      } else {
+        output = builder.call<emscripten::val>(
+            "softmax", webnn_operands.at(input_tensor_id));
+      }
+
+      webnn_operands.insert(std::make_pair(output_tensor_id, output));
       TF_LITE_ENSURE(logging_context,
                      webnn_operands.at(output_tensor_id).as<bool>());
     }
