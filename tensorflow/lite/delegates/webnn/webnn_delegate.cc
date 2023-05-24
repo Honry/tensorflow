@@ -1762,7 +1762,7 @@ class Subgraph {
       std::unordered_map<int, emscripten::val>& webnn_operands,
       const bool detect_supported_op) {
     TF_LITE_ENSURE_STATUS(
-        CheckNumInputsAndOutputs(logging_context, node, 1, 4, 1, node_index));
+        CheckNumInputsAndOutputs(logging_context, node, 2, 4, 1, node_index));
     const int num_inputs = NumInputs(node);
 
     const int output_tensor_id = node->outputs->data[0];
@@ -2576,6 +2576,8 @@ class Subgraph {
       // WebNN Softmax only support 2d input shape, reshape input to 2d.
       if (input_shape.size() != 2) {
         emscripten::val new_shape = emscripten::val::array();
+        // TODO: Remove 'null' support and compute the dimension size in
+        // delegate. https://github.com/webmachinelearning/webnn/issues/388
         new_shape.call<void>("push", emscripten::val::null());
         new_shape.call<void>("push", input_shape.back());
 
