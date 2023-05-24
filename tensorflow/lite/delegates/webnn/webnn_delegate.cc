@@ -692,6 +692,47 @@ class Subgraph {
                             expected_num_dims, tensor_index);
   }
 
+  static TfLiteStatus CheckSlopeTensorShape(TfLiteContext* context,
+                                            const TfLiteTensor& tensor,
+                                            int tensor_index,
+                                            int node_index,
+                                            int input_last_dim) {
+    const auto slope_rank = NumDimensions(&tensor);
+    if (slope_rank < 1) {
+      TF_LITE_MAYBE_KERNEL_LOG(context,
+                               "unexpected number of shape dimensions (%d) in "
+                               "slope tensor #%d in Prelu node #%d: "
+                               "expected at least a 1D tensor",
+                               slope_rank, tensor_index, node_index);
+      return kTfLiteError;
+    }
+    // Validate that all non-channel dimensions (if any) are exactly 1.
+    for (int i = 0; i < slope_rank - 1; i++) {
+      if (SizeOfDimension(&tensor, i) != 1) {
+        TF_LITE_MAYBE_KERNEL_LOG(
+            context,
+            "unexpected value %d of shape dimension #%d in "
+            "slope tensor #%d in Prelu node #%d: "
+            "expected 1 for non-channel dimensions",
+            tensor.dims->data[i], i, tensor_index, node_index);
+        return kTfLiteError;
+      }
+    }
+    // Validate that the input and slope have the same last dimension.
+    if (tensor.dims->data[slope_rank - 1] != input_last_dim) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context,
+          "unexpected value %d of last dimension in "
+          "slope tensor #%d in Prelu node #%d: "
+          "expected %d to be same as input's last dimension",
+          tensor.dims->data[slope_rank - 1], tensor_index, node_index,
+          input_last_dim);
+      return kTfLiteError;
+    }
+
+    return kTfLiteOk;
+  }
+
   static TfLiteStatus CheckPaddingsTensorShape(TfLiteContext* context,
                                                const TfLiteTensor& tensor,
                                                int expected_rows,
@@ -958,6 +999,10 @@ class Subgraph {
         return VisitPadNode(builder, logging_context, node_index, node,
                             context->tensors, webnn_operands,
                             detect_supported_op);
+      case kTfLiteBuiltinPrelu:
+        return VisitPreluNode(builder, logging_context, node_index, node,
+                              context->tensors, webnn_operands,
+                              detect_supported_op);
       case kTfLiteBuiltinAveragePool2d: {
         const TfLitePoolParams* pool_params =
             static_cast<const TfLitePoolParams*>(node->builtin_data);
@@ -1423,6 +1468,61 @@ class Subgraph {
                                 "pad", webnn_operands.at(input_tensor_id),
                                 beginning_padding, ending_padding)));
       TF_LITE_ENSURE(logging_context, webnn_operands.at(output_tensor_id).as<bool>());
+    }
+
+    return kTfLiteOk;
+  }
+
+  static TfLiteStatus VisitPreluNode(
+      const emscripten::val& builder, TfLiteContext* logging_context,
+      int node_index, TfLiteNode* node, const TfLiteTensor* tensors,
+      std::unordered_map<int, emscripten::val>& webnn_operands,
+      const bool detect_supported_op) {
+    TF_LITE_ENSURE_STATUS(
+        CheckNumInputsAndOutputs(logging_context, node, 2, 1, node_index));
+
+    const int input_tensor_id = node->inputs->data[0];
+    const TfLiteTensor& input_tensor = tensors[input_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(logging_context, input_tensor,
+                                                 input_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, input_tensor, input_tensor_id, node_index));
+
+    const int input_last_dim =
+        input_tensor.dims->data[input_tensor.dims->size - 1];
+
+    const int slope_tensor_id = node->inputs->data[1];
+    const TfLiteTensor& slope_tensor = tensors[slope_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(logging_context, slope_tensor,
+                                                 slope_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckSlopeTensorShape(logging_context, slope_tensor,
+                                                slope_tensor_id, node_index,
+                                                input_last_dim));
+
+    TF_LITE_ENSURE_STATUS(CheckTensorStaticAllocation(
+        logging_context, slope_tensor, slope_tensor_id, node_index));
+
+    const int output_tensor_id = node->outputs->data[0];
+    const TfLiteTensor& output_tensor = tensors[output_tensor_id];
+    TF_LITE_ENSURE_STATUS(CheckTensorFloat32Type(logging_context, output_tensor,
+                                                 output_tensor_id, node_index));
+    TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
+        logging_context, output_tensor, output_tensor_id, node_index));
+
+    if (detect_supported_op) {
+      TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "prelu"));
+    } else {
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(input_tensor_id).as<bool>());
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(slope_tensor_id).as<bool>());
+
+      webnn_operands.insert(std::make_pair(
+          output_tensor_id, builder.call<emscripten::val>(
+                                "prelu", webnn_operands.at(input_tensor_id),
+                                webnn_operands.at(slope_tensor_id))));
+      TF_LITE_ENSURE(logging_context,
+                     webnn_operands.at(output_tensor_id).as<bool>());
     }
 
     return kTfLiteOk;
