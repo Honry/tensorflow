@@ -2300,7 +2300,8 @@ class Subgraph {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "elu"));
     } else {
       TF_LITE_ENSURE(logging_context, webnn_operands.at(input_tensor_id).as<bool>());
-      // alpha = 1.0 in TFLite Elu node.
+      // alpha = 1.0 in TFLite Elu node, WebNN's MLEluOptions.alpha is default to 1.0,
+      // so no need to set it.
       webnn_operands.insert(std::make_pair(
           output_tensor_id, builder.call<emscripten::val>(
                                 "elu", webnn_operands.at(input_tensor_id))));
