@@ -3066,6 +3066,7 @@ class Subgraph {
         logging_context, begin_tensor, begin_tensor_id, node_index));
     // TODO(b/246969669): TFLite only supports int32 begin ends and strides,
     // support int64 too when TFLite supports it as well.
+    // Refer to https://github.com/tensorflow/tensorflow/blob/master/tensorflow/lite/delegates/xnnpack/xnnpack_delegate.cc#L5404
     TF_LITE_ENSURE_STATUS(CheckTensorInt32Type(logging_context, begin_tensor,
                                                begin_tensor_id, node_index));
 
