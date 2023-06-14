@@ -2250,8 +2250,16 @@ class Subgraph {
       options.set("strides", emscripten::val::array(strides));
       options.set("dilations", emscripten::val::array(dilations));
       options.set("inputLayout", emscripten::val("nhwc"));
-      options.set("filterLayout", emscripten::val("ihwo"));
-      options.set("groups", emscripten::val(output_channels / dwconv_params->depth_multiplier));
+      const auto groups = output_channels / dwconv_params->depth_multiplier;
+      options.set("groups", groups);
+      if (groups != 1) {
+        options.set("filterLayout", emscripten::val("ihwo"));
+      } else {
+        // groups == 1 is a normal conv2d in WebNN.
+        // TODO: Consider depth_multipiler != 1 once the spec issue:
+        // https://github.com/webmachinelearning/webnn/issues/353 fixed.
+        options.set("filterLayout", emscripten::val("ohwi"));
+      }
       TF_LITE_ENSURE(logging_context, webnn_operands.at(input_tensor_id).as<bool>());
       TF_LITE_ENSURE(logging_context, webnn_operands.at(filter_tensor_id).as<bool>());
       if (bias_tensor_id >= 0) {
