@@ -46,11 +46,15 @@ TfLiteDelegate* CreateTfLiteWebNNDelegateFromOptions(char** options_keys,
   }
 
   constexpr char kWebNNDeviceType[] = "webnn_device";
+  constexpr char kWebNNNumThreads[] = "webnn_threads";
 
   std::vector<tflite::Flag> flag_list = {
       tflite::Flag::CreateFlag(kWebNNDeviceType,
                                reinterpret_cast<int32_t*>(&options.deviceType),
                                "WebNN device (0:auto, 1:gpu, 2:cpu)."),
+      tflite::Flag::CreateFlag(kWebNNNumThreads,
+                               reinterpret_cast<int32_t*>(&options.numThreads),
+                               "WebNN numThreads"),
   };
 
   int argc = num_options + 1;
@@ -59,7 +63,9 @@ TfLiteDelegate* CreateTfLiteWebNNDelegateFromOptions(char** options_keys,
   }
 
   TFLITE_LOG(INFO) << "WebNN delegate: WebNN device set to "
-                   << options.deviceType << ".";
+                   << options.deviceType << ", numThreads set to "
+                   << options.numThreads;
+
 
   return TfLiteWebNNDelegateCreate(&options);
 }
