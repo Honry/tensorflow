@@ -3919,7 +3919,7 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
 }  // namespace tflite
 
 TfLiteWebNNDelegateOptions TfLiteWebNNDelegateOptionsDefault() {
-  TfLiteWebNNDelegateOptions options = {2, 2};
+  TfLiteWebNNDelegateOptions options = {2, 2, 0};
   return options;
 }
 
@@ -3934,8 +3934,9 @@ TfLiteDelegate* TfLiteWebNNDelegateCreate(
       power_preference_name_s[options->powerPreference];
   TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
                        "Created TensorFlow Lite WebNN delegate for device"
-                       " %s and power %s.",
-                       device_type_name.c_str(), power_preference_name.c_str());
+                       " %s, power %s and numThreads %d.",
+                       device_type_name.c_str(), power_preference_name.c_str(),
+                       options->numThreads);
 
   // Check if WebNN is supported
   const emscripten::val graph_builder =
@@ -3952,6 +3953,7 @@ TfLiteDelegate* TfLiteWebNNDelegateCreate(
   context_options.set("deviceType", emscripten::val(device_type_name));
   context_options.set("powerPreference",
                       emscripten::val(power_preference_name));
+  context_options.set("numThreads", options->numThreads);
   emscripten::val wnn_context =
       ml.call<emscripten::val>("createContextSync", context_options);
 

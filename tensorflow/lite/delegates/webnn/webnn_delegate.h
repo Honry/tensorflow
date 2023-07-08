@@ -35,6 +35,7 @@ typedef struct {
   //     Low_power = 0x00000002,
   // };
   uint32_t powerPreference;
+  uint32_t numThreads;
 } TfLiteWebNNDelegateOptions;
 
 // Returns a structure with the default WebNN delegate options.
