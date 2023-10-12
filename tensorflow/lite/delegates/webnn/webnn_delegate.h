@@ -27,6 +27,7 @@ typedef struct {
   //     Auto = 0x00000000,
   //     Gpu = 0x00000001,
   //     Cpu = 0x00000002,
+  //     Npu = 0x00000003,
   // };
   uint32_t deviceType;
   // enum class PowerPreference : uint32_t {
