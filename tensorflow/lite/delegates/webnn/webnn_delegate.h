@@ -24,14 +24,13 @@ extern "C" {
 
 typedef struct {
   // enum class DeviceType : uint32_t {
-  //     Auto = 0x00000000,
+  //     Cpu = 0x00000000,
   //     Gpu = 0x00000001,
-  //     Cpu = 0x00000002,
-  //     Npu = 0x00000003,
+  //     Npu = 0x00000002,
   // };
   uint32_t deviceType;
   // enum class PowerPreference : uint32_t {
-  //     Auto = 0x00000000,
+  //     Default = 0x00000000,
   //     High_performance = 0x00000001,
   //     Low_power = 0x00000002,
   // };

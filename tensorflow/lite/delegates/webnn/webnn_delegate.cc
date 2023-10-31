@@ -3919,16 +3919,16 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
 }  // namespace tflite
 
 TfLiteWebNNDelegateOptions TfLiteWebNNDelegateOptionsDefault() {
-  TfLiteWebNNDelegateOptions options = {2, 2, 0};
+  TfLiteWebNNDelegateOptions options = {0, 2, 0};
   return options;
 }
 
 TfLiteDelegate* TfLiteWebNNDelegateCreate(
     const TfLiteWebNNDelegateOptions* options) {
   std::unordered_map<uint32_t, std::string> device_type_name_s = {
-      {0, "auto"}, {1, "gpu"}, {2, "cpu"}, {3, "npu"}};
+      {0, "cpu"}, {1, "gpu"}, {2, "npu"}};
   std::unordered_map<uint32_t, std::string> power_preference_name_s = {
-      {0, "auto"}, {1, "high-performance"}, {2, "low-power"}};
+      {0, "default"}, {1, "high-performance"}, {2, "low-power"}};
   std::string device_type_name = device_type_name_s[options->deviceType];
   std::string power_preference_name =
       power_preference_name_s[options->powerPreference];
