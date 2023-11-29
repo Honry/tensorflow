@@ -42,6 +42,7 @@ limitations under the License.
 #include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
 #include "tensorflow/lite/kernels/internal/utils/sparsity_format_converter.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
+#include "tensorflow/lite/kernels/padding.h"
 
 namespace tflite {
 namespace webnn {
@@ -397,6 +398,75 @@ class Subgraph {
                                  static_cast<int>(padding), node_index);
         return kTfLiteError;
     }
+  }
+
+  // Calculate WebNN padding values specific for kTfLitePaddingSame.
+  static TfLiteStatus CalculateWebnnPaddings(
+      TfLiteContext* context, int input_height, int input_width,
+      int kernel_height, int kernel_width, int dilation_height,
+      int dilation_width, int stride_height, int stride_width, int node_index,
+      int output_height, int output_width, std::vector<int32_t>& padding,
+      bool isTransposeConv = false) {
+    const int effective_kernel_height =
+        (kernel_height - 1) * dilation_height + 1;
+    const int effective_kernel_width = (kernel_width - 1) * dilation_width + 1;
+    int expected_height = 0;
+    int expected_width = 0;
+    int height = input_height;
+    int width = input_width;
+    if (isTransposeConv) {
+      // TransposeConv uses output_height and output_width to calculate
+      // expected input height and input width.
+      height = output_height;
+      width = output_width;
+    }
+    TfLitePaddingValues paddings = ComputePaddingHeightWidth(
+        stride_height, stride_width, dilation_height, dilation_width, height,
+        width, kernel_height, kernel_width, kTfLitePaddingSame,
+        &expected_height, &expected_width);
+
+    if (isTransposeConv) {
+      if (expected_height != input_height || expected_width != input_width) {
+        TF_LITE_MAYBE_KERNEL_LOG(
+            context,
+            "inconsistent combination of parameters for TRANSPOSE_CONV op "
+            "in node #%d: computed input size %dx%d (HxW), actual %dx%d",
+            node_index, expected_height, expected_width, input_height,
+            input_width);
+        return kTfLiteError;
+      }
+    } else {
+      if (expected_height != output_height || expected_width != output_width) {
+        TF_LITE_MAYBE_KERNEL_LOG(
+            context,
+            "inconsistent combination of parameters for node #%d: "
+            "computed output size %dx%d (HxW), actual %dx%d",
+            node_index, expected_height, expected_width, output_height,
+            output_width);
+        return kTfLiteError;
+      }
+    }
+
+    // Note: In the derivation of the adjustments below, it was assumed that
+    //       `effective_kernel_...` >= `stride_...` so that `ComputePadding`
+    //       in TFLite doesn't encounter a negative value clamped to zero.
+    if (isTransposeConv && (effective_kernel_height < stride_height ||
+                            effective_kernel_width < stride_width)) {
+      TF_LITE_MAYBE_KERNEL_LOG(
+          context,
+          "strides larger than effective kernel dimensions unsupported in "
+          "TRANSPOSE_CONV node #%d: kernel size %dx%d (HxW), strides %dx%d",
+          node_index, effective_kernel_height, effective_kernel_width,
+          stride_height, stride_width);
+      return kTfLiteError;
+    }
+
+    padding[0] = paddings.height;
+    padding[1] = paddings.height + paddings.height_offset;
+    padding[2] = paddings.width;
+    padding[3] = paddings.width + paddings.width_offset;
+
+    return kTfLiteOk;
   }
 
   static TfLiteStatus CheckConvolutionParams(TfLiteContext* context,
@@ -1614,9 +1684,29 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(
         CheckPoolingParams(logging_context, pool_params, node_index));
 
+    const int* input_tensor_dims = input_tensor.dims->data;
+    const int input_height = input_tensor_dims[1];
+    const int input_width = input_tensor_dims[2];
+
+    const int* output_tensor_dims = output_tensor.dims->data;
+    const int output_height = output_tensor_dims[1];
+    const int output_width = output_tensor_dims[2];
+
     std::string auto_pad;
     TF_LITE_ENSURE_STATUS(CalculatePadding(
         logging_context, pool_params->padding, auto_pad, node_index));
+
+    std::vector<int32_t> padding(4, 0);
+
+    if (auto_pad == "same-upper") {
+      TF_LITE_ENSURE_STATUS(CalculateWebnnPaddings(
+          logging_context, input_height, input_width,
+          pool_params->filter_height, pool_params->filter_width,
+          /*dilation_height=*/1,
+          /*dilation_width=*/1, pool_params->stride_height,
+          pool_params->stride_width, node_index, output_height, output_width,
+          padding));
+    }
 
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(
@@ -1636,7 +1726,7 @@ class Subgraph {
             pool_params->filter_height, pool_params->filter_width};
 
         emscripten::val options = emscripten::val::object();
-        options.set("autoPad", emscripten::val(auto_pad));
+        options.set("padding", emscripten::val::array(padding));
         options.set("strides", emscripten::val::array(strides));
         options.set("windowDimensions", emscripten::val::array(windowDimensions));
         options.set("layout", emscripten::val("nhwc"));
@@ -1682,9 +1772,29 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(
         CheckPoolingParams(logging_context, pool_params, node_index));
 
+    const int* input_tensor_dims = input_tensor.dims->data;
+    const int input_height = input_tensor_dims[1];
+    const int input_width = input_tensor_dims[2];
+
+    const int* output_tensor_dims = output_tensor.dims->data;
+    const int output_height = output_tensor_dims[1];
+    const int output_width = output_tensor_dims[2];
+
     std::string auto_pad;
     TF_LITE_ENSURE_STATUS(CalculatePadding(
         logging_context, pool_params->padding, auto_pad, node_index));
+
+    std::vector<int32_t> padding(4, 0);
+
+    if (auto_pad == "same-upper") {
+      TF_LITE_ENSURE_STATUS(CalculateWebnnPaddings(
+          logging_context, input_height, input_width,
+          pool_params->filter_height, pool_params->filter_width,
+          /*dilation_height=*/1,
+          /*dilation_width=*/1, pool_params->stride_height,
+          pool_params->stride_width, node_index, output_height, output_width,
+          padding));
+    }
 
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "maxPool2d"));
@@ -1697,7 +1807,7 @@ class Subgraph {
           pool_params->filter_height, pool_params->filter_width};
 
       emscripten::val options = emscripten::val::object();
-      options.set("autoPad", emscripten::val(auto_pad));
+      options.set("padding", emscripten::val::array(padding));
       options.set("strides", emscripten::val::array(strides));
       options.set("windowDimensions", emscripten::val::array(windowDimensions));
       options.set("layout", emscripten::val("nhwc"));
@@ -2045,9 +2155,31 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, output_tensor_id, node_index));
 
+    const int* input_tensor_dims = input_tensor.dims->data;
+    const int input_height = input_tensor_dims[1];
+    const int input_width = input_tensor_dims[2];
+
+    const int* output_tensor_dims = output_tensor.dims->data;
+    const int output_height = output_tensor_dims[1];
+    const int output_width = output_tensor_dims[2];
+
+    const int kernel_height = filter_tensor.dims->data[1];
+    const int kernel_width = filter_tensor.dims->data[2];
+
     std::string auto_pad;
     TF_LITE_ENSURE_STATUS(CalculatePadding(
         logging_context, conv_params->padding, auto_pad, node_index));
+
+    std::vector<int32_t> padding(4, 0);
+
+    if (auto_pad == "same-upper") {
+      TF_LITE_ENSURE_STATUS(CalculateWebnnPaddings(
+          logging_context, input_height, input_width, kernel_height,
+          kernel_width, conv_params->dilation_height_factor,
+          conv_params->dilation_width_factor, conv_params->stride_height,
+          conv_params->stride_width, node_index, output_height, output_width,
+          padding));
+    }
 
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "conv2d"));
@@ -2060,7 +2192,7 @@ class Subgraph {
           conv_params->dilation_height_factor, conv_params->dilation_width_factor};
 
       emscripten::val options = emscripten::val::object();
-      options.set("autoPad", emscripten::val(auto_pad));
+      options.set("padding", emscripten::val::array(padding));
       options.set("strides", emscripten::val::array(strides));
       options.set("dilations", emscripten::val::array(dilations));
       options.set("inputLayout", emscripten::val("nhwc"));
@@ -2137,6 +2269,14 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckTensorNonDynamicAllocation(
         logging_context, output_tensor, output_tensor_id, node_index));
 
+    const int* input_tensor_dims = input_tensor.dims->data;
+    const int input_height = input_tensor_dims[1];
+    const int input_width = input_tensor_dims[2];
+
+    const int* output_tensor_dims = output_tensor.dims->data;
+    const int output_height = output_tensor_dims[1];
+    const int output_width = output_tensor_dims[2];
+
     const int output_channels = filter_tensor.dims->data[0];
     const int kernel_height = filter_tensor.dims->data[1];
     const int kernel_width = filter_tensor.dims->data[2];
@@ -2149,11 +2289,22 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CalculatePadding(
         logging_context, deconv_params->padding, auto_pad, node_index));
 
+    std::vector<int32_t> padding(4, 0);
+
+    if (auto_pad == "same-upper") {
+      TF_LITE_ENSURE_STATUS(CalculateWebnnPaddings(
+          logging_context, input_height, input_width, kernel_height,
+          kernel_width, /*dilation_height=*/1,
+          /*dilation_width=*/1, deconv_params->stride_height,
+          deconv_params->stride_width, node_index, output_height, output_width,
+          padding, true));
+    }
+
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "convTranspose2d"));
     } else {
       emscripten::val options = emscripten::val::object();
-      options.set("autoPad", emscripten::val(auto_pad));
+      options.set("padding", emscripten::val::array(padding));
       std::vector<int32_t> strides = {
           deconv_params->stride_height, deconv_params->stride_width};
       options.set("strides", emscripten::val::array(strides));
@@ -2232,9 +2383,31 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CheckDepthwiseConvolutionParams(
         logging_context, dwconv_params, output_channels, node_index));
 
+    const int* input_tensor_dims = input_tensor.dims->data;
+    const int input_height = input_tensor_dims[1];
+    const int input_width = input_tensor_dims[2];
+
+    const int* output_tensor_dims = output_tensor.dims->data;
+    const int output_height = output_tensor_dims[1];
+    const int output_width = output_tensor_dims[2];
+
+    const int kernel_height = filter_tensor.dims->data[1];
+    const int kernel_width = filter_tensor.dims->data[2];
+
     std::string auto_pad;
     TF_LITE_ENSURE_STATUS(CalculatePadding(
         logging_context, dwconv_params->padding, auto_pad, node_index));
+
+    std::vector<int32_t> padding(4, 0);
+
+    if (auto_pad == "same-upper") {
+      TF_LITE_ENSURE_STATUS(CalculateWebnnPaddings(
+          logging_context, input_height, input_width, kernel_height,
+          kernel_width, dwconv_params->dilation_height_factor,
+          dwconv_params->dilation_width_factor, dwconv_params->stride_height,
+          dwconv_params->stride_width, node_index, output_height, output_width,
+          padding));
+    }
 
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "conv2d"));
@@ -2247,7 +2420,7 @@ class Subgraph {
           dwconv_params->dilation_height_factor, dwconv_params->dilation_width_factor};
 
       emscripten::val options = emscripten::val::object();
-      options.set("autoPad", emscripten::val(auto_pad));
+      options.set("padding", emscripten::val::array(padding));
       options.set("strides", emscripten::val::array(strides));
       options.set("dilations", emscripten::val::array(dilations));
       options.set("inputLayout", emscripten::val("nhwc"));
@@ -3339,8 +3512,17 @@ class Subgraph {
         logging_context, output_tensor, output_tensor_id, node_index));
 
     const int* input_tensor_dims = input_tensor.dims->data;
+    const int input_height = input_tensor_dims[1];
+    const int input_width = input_tensor_dims[2];
+
+    const int* output_tensor_dims = output_tensor.dims->data;
+    const int output_height = output_tensor_dims[1];
+    const int output_width = output_tensor_dims[2];
+
     const int* filter_tensor_dims = filter_tensor.dims->data;
     const int output_channels = filter_tensor_dims[0];
+    const int kernel_height = filter_tensor_dims[1];
+    const int kernel_width = filter_tensor_dims[2];
     const int input_channels = filter_tensor_dims[3];
 
     const int32_t* output_shape = GetTensorData<int32_t>(&output_shape_tensor);
@@ -3368,11 +3550,22 @@ class Subgraph {
     TF_LITE_ENSURE_STATUS(CalculatePadding(
         logging_context, deconv_params->padding, auto_pad, node_index));
 
+    std::vector<int32_t> padding(4, 0);
+
+    if (auto_pad == "same-upper") {
+      TF_LITE_ENSURE_STATUS(CalculateWebnnPaddings(
+          logging_context, input_height, input_width, kernel_height,
+          kernel_width, /*dilation_height=*/1,
+          /*dilation_width=*/1, deconv_params->stride_height,
+          deconv_params->stride_width, node_index, output_height, output_width,
+          padding, true));
+    }
+
     if (detect_supported_op) {
       TF_LITE_ENSURE_STATUS(CheckWebNNOpSupport(builder, "convTranspose2d"));
     } else {
       emscripten::val options = emscripten::val::object();
-      options.set("autoPad", emscripten::val(auto_pad));
+      options.set("padding", emscripten::val::array(padding));
       std::vector<int32_t> strides = {deconv_params->stride_height,
                                       deconv_params->stride_width};
       options.set("strides", emscripten::val::array(strides));

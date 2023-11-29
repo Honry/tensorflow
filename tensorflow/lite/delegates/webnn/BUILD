@@ -34,6 +34,7 @@ cc_library(
         "//tensorflow/lite/kernels/internal:tensor",
         "//tensorflow/lite/kernels/internal/utils:sparsity_format_converter",
         "//tensorflow/lite/kernels:kernel_util",
+        "//tensorflow/lite/kernels:padding",
         "@FP16",
     ],
 )
