@@ -2521,7 +2521,7 @@ class Subgraph {
       if (fc_params->keep_num_dims || input_tensor.dims->size != 2) {
         // Reshape input to 2D tensor
         emscripten::val new_input_shape = emscripten::val::array();
-        new_input_shape.call<void>("push", emscripten::val::null());
+        new_input_shape.call<void>("push", num_input_elements / input_channels);
         new_input_shape.call<void>("push", input_channels);
         emscripten::val reshaped_input = builder.call<emscripten::val>(
             "reshape", webnn_operands.at(input_tensor_id), new_input_shape);
@@ -2908,9 +2908,7 @@ class Subgraph {
       // WebNN Softmax only support 2d input shape, reshape input to 2d.
       if (input_shape.size() != 2) {
         emscripten::val new_shape = emscripten::val::array();
-        // TODO: Remove 'null' support and compute the dimension size in
-        // delegate. https://github.com/webmachinelearning/webnn/issues/388
-        new_shape.call<void>("push", emscripten::val::null());
+        new_shape.call<void>("push", static_cast<int32_t>(NumElements(&input_tensor) / input_shape.back()));
         new_shape.call<void>("push", input_shape.back());
 
         emscripten::val reshape = builder.call<emscripten::val>(
