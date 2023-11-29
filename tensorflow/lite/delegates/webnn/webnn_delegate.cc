@@ -261,6 +261,7 @@ class Subgraph {
       if (inputs.count(t) != 0 || quasi_static_tensors.count(t) != 0) {
         emscripten::val desc = emscripten::val::object();
         desc.set("type", emscripten::val(datatype));
+        desc.set("dataType", emscripten::val(datatype));
         // Workaround for single-value operand as which is not supported in Chromium yet
         // TODO: remove this workaround once it is supported
         if (dims.size() == 0) {
